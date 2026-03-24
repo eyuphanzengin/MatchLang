@@ -1,274 +1,413 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../data/database_helper.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-class UserDataProvider extends ChangeNotifier {
+class UserDataProvider with ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  DocumentReference<Map<String, dynamic>> get _userRef {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw Exception("User not logged in");
+    }
+    return _firestore.collection('users').doc(user.uid);
+  }
+
+  // --- TEMEL VERİLER ---
   String? userId;
-  String? displayName;
-  int coins = 200;
+  String userName = "Misafir";
+  int currentLevel = 1;
   int hearts = 5;
   int stars = 0;
-  int currentLevel = 1;
-  String? userEmail;
-  String? avatarPath;
-  bool dailyGiftTaken = false;
-  DateTime? lastDailyGiftTime;
+  int totalScore = 0;
   DateTime? lastHeartTime;
-  DateTime? lastWheelSpinTime;
+  String? avatarPath;
+  int streakCount = 0;
+  DateTime? lastLoginDate;
+
+  // --- AYARLAR ---
   bool isSoundOn = true;
   bool isVibrationOn = true;
+
+  // --- İSTATİSTİKLER ---
+  Map<String, Map<String, int>> wordStats = {};
+  List<String> knownWords = [];
   int todaysCorrectAnswers = 0;
   int todaysIncorrectAnswers = 0;
-  static const String guestUserId = 'guest_user';
 
-  Future<void> _save() async {
-    if (userId == null) return;
-    await DatabaseHelper.instance.insertOrUpdateUserData(
-      userId: userId!,
-      displayName: displayName ?? 'Kullanıcı',
-      coins: coins,
-      hearts: hearts,
-      stars: stars,
-      currentLevel: currentLevel,
-      dailyGiftTaken: dailyGiftTaken ? 1 : 0,
-      avatar: avatarPath,
-      lastDailyGiftTime: lastDailyGiftTime?.toIso8601String(),
-      lastHeartTime: lastHeartTime?.toIso8601String(),
-      lastWheelSpinTime: lastWheelSpinTime?.toIso8601String(),
-      isSoundOn: isSoundOn,
-      isVibrationOn: isVibrationOn,
-    );
+  UserDataProvider() {
+    _initUser();
   }
+
+  void _initUser() {
+    FirebaseAuth.instance.authStateChanges().listen((User? user) {
+      if (user != null) {
+        userId = user.uid;
+        load();
+      } else {
+        userId = null;
+        _resetLocalData();
+        notifyListeners();
+      }
+    });
+  }
+
+  void _resetLocalData() {
+    userName = "Misafir";
+    currentLevel = 1;
+    hearts = 5;
+    stars = 0;
+    totalScore = 0;
+    lastHeartTime = null;
+    avatarPath = 'assets/avatars/avatar1.png';
+    wordStats = {};
+    knownWords = [];
+    isSoundOn = true;
+    isVibrationOn = true;
+    todaysCorrectAnswers = 0;
+    todaysIncorrectAnswers = 0;
+    streakCount = 0;
+    lastLoginDate = null;
+  }
+
   Future<void> load() async {
-    final user = FirebaseAuth.instance.currentUser;
-    String effectiveUserId;
-    if (user != null) {
-      effectiveUserId = user.uid;
-      userId = user.uid;
-      userEmail = user.email;
-      displayName = user.displayName ?? 'Kullanıcı';
-    } else {
-      effectiveUserId = guestUserId;
-      userId = guestUserId;
-      userEmail = null;
-    }
+    await _loadUserData();
+  }
 
-    final data = await DatabaseHelper.instance.getUserData(effectiveUserId);
+  Future<void> _loadUserData() async {
+    if (userId == null) return;
+    try {
+      final doc = await _userRef.get();
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        userName = data['userName'] ?? "Misafir";
+        currentLevel = data['currentLevel'] ?? 1;
+        hearts = data['hearts'] ?? 5;
+        stars = data['stars'] ?? 0;
+        totalScore = data['score'] ?? 0;
+        avatarPath = data['avatarPath'] ?? 'assets/avatars/avatar1.png';
+        isSoundOn = data['isSoundOn'] ?? true;
+        isVibrationOn = data['isVibrationOn'] ?? true;
+        todaysCorrectAnswers = data['todaysCorrectAnswers'] ?? 0;
+        todaysIncorrectAnswers = data['todaysIncorrectAnswers'] ?? 0;
+        if (data['knownWords'] != null) {
+          knownWords = List<String>.from(data['knownWords']);
+        }
+        if (data['lastHeartTime'] != null) {
+          lastHeartTime = (data['lastHeartTime'] as Timestamp).toDate();
+        }
+        streakCount = data['streakCount'] ?? 0;
+        if (data['lastLoginDate'] != null) {
+          lastLoginDate = (data['lastLoginDate'] as Timestamp).toDate();
+        }
 
-    if (data != null) {
-      coins = data['coins'] ?? 200;
-      hearts = data['hearts'] ?? 5;
-      stars = data['stars'] ?? 0;
-      currentLevel = data['current_level'] ?? 1;
-      displayName =
-          data['display_name'] ?? (user == null ? 'Misafir' : 'Kullanıcı');
-      dailyGiftTaken = (data['daily_gift_taken'] ?? 0) == 1;
-      avatarPath = data['avatar'];
-      lastDailyGiftTime = data['last_daily_gift_time'] != null
-          ? DateTime.tryParse(data['last_daily_gift_time'])
-          : null;
-      lastHeartTime = data['last_heart_time'] != null
-          ? DateTime.tryParse(data['last_heart_time'])
-          : null;
-      lastWheelSpinTime = data['last_wheel_spin_time'] != null
-          ? DateTime.tryParse(data['last_wheel_spin_time'])
-          : null;
-      isSoundOn = (data['is_sound_on'] ?? 1) == 1;
-      isVibrationOn = (data['is_vibration_on'] ?? 1) == 1;
-    } else {
-      _setDefaultValues();
-      displayName = (user == null
-          ? 'Misafir'
-          : (user.displayName ?? 'Kullanıcı'));
-      await _save(); 
+        _checkAndUpdateStreak();
+      } else {
+        await _initNewUser();
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Error loading user data: $e");
     }
-    await loadDailyStats();
-    notifyListeners();
+  }
+
+  Future<void> _initNewUser() async {
+    await _userRef.set({
+      'userName': "Misafir",
+      'currentLevel': 1,
+      'hearts': 5,
+      'stars': 0,
+      'score': 0,
+      'lastHeartTime': null,
+      'avatarPath': 'assets/avatars/avatar1.png',
+      'isSoundOn': true,
+      'isVibrationOn': true,
+      'todaysCorrectAnswers': 0,
+      'todaysIncorrectAnswers': 0,
+      'knownWords': [],
+      'streakCount': 0,
+      'lastLoginDate': null,
+    });
+    _resetLocalData();
   }
 
   Future<void> mergeGuestDataToNewUser(String newUserId) async {
-    final existingUserData = await DatabaseHelper.instance.getUserData(
-      newUserId,
-    );
-
-    if (existingUserData != null) {
-      userId = newUserId;
-      await load();
-      return;
-    }
-
-    if (userId == guestUserId) {
-      final guestData = await DatabaseHelper.instance.getUserData(guestUserId);
-      if (guestData != null) {
-        final finalDisplayName =
-            FirebaseAuth.instance.currentUser?.displayName ?? 'Kullanıcı';
-
-        await DatabaseHelper.instance.insertOrUpdateUserData(
-          userId: newUserId,
-          displayName: finalDisplayName,
-          coins: guestData['coins'],
-          hearts: guestData['hearts'],
-          stars: guestData['stars'],
-          currentLevel: guestData['current_level'],
-          dailyGiftTaken: guestData['daily_gift_taken'],
-          avatar: guestData['avatar'],
-          lastDailyGiftTime: guestData['last_daily_gift_time'],
-          lastHeartTime: guestData['last_heart_time'],
-          lastWheelSpinTime: guestData['last_wheel_spin_time'],
-          isSoundOn: (guestData['is_sound_on'] ?? 1) == 1,
-          isVibrationOn: (guestData['is_vibration_on'] ?? 1) == 1,
-        );
-
-        await DatabaseHelper.instance.deleteUser(guestUserId);
-      }
-    }
     userId = newUserId;
     await load();
   }
 
-  void _setDefaultValues() {
-    coins = 200;
-    hearts = 5;
-    stars = 0;
-    currentLevel = 1;
-    isSoundOn = true;
-    isVibrationOn = true;
-    dailyGiftTaken = false;
-    lastDailyGiftTime = null;
-    lastHeartTime = null;
-    lastWheelSpinTime = null;
-    avatarPath = null;
-    todaysCorrectAnswers = 0;
-    todaysIncorrectAnswers = 0;
-  }
+  void _checkAndUpdateStreak() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
 
-  Future<void> signOutAndReload() async {
-    _setDefaultValues();
-    userId = null;
-    userEmail = null;
-    displayName = null;
+    if (lastLoginDate != null) {
+      final lastLogin = DateTime(
+        lastLoginDate!.year,
+        lastLoginDate!.month,
+        lastLoginDate!.day,
+      );
+      final difference = today.difference(lastLogin).inDays;
 
-    await load();
-  }
-
-  Future<void> resetProgress() async {
-    final originalUserId = userId;
-    final originalDisplayName = displayName;
-    final originalUserEmail = userEmail;
-
-    _setDefaultValues();
-
-    userId = originalUserId;
-    displayName = originalDisplayName;
-    userEmail = originalUserEmail;
-
-    if (userId != null) {
-      await _save();
+      if (difference > 1) {
+        // Seri bozulmuş, sadece sıfırla ama arttırma. Arttırma oyun kazanınca olur.
+        streakCount = 0;
+        if (userId != null) {
+          _userRef.update({'streakCount': streakCount});
+        }
+      }
     }
-    notifyListeners();
   }
 
-  Future<void> loadDailyStats() async {
-    if (userId == null) return;
-    final todayString = DateTime.now().toIso8601String().substring(0, 10);
-    final statsData = await DatabaseHelper.instance.getDailyStats(
-      userId!,
-      todayString,
-    );
-    todaysCorrectAnswers = statsData?['correct_answers'] ?? 0;
-    todaysIncorrectAnswers = statsData?['incorrect_answers'] ?? 0;
-    notifyListeners();
-  }
+  /// Günün ilk oyunu kazanıldığında çağrılır.
+  /// Eğer o gün için seri henüz artmamışsa artırır ve true döner.
+  bool increaseStreakIfNeeded() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
 
-  Future<void> recordAnswer(bool wasCorrect) async {
-    if (userId == null) return;
-    if (wasCorrect) {
-      todaysCorrectAnswers++;
+    if (lastLoginDate != null) {
+      final lastLogin = DateTime(
+        lastLoginDate!.year,
+        lastLoginDate!.month,
+        lastLoginDate!.day,
+      );
+      final difference = today.difference(lastLogin).inDays;
+
+      if (difference >= 1) {
+        streakCount++;
+        lastLoginDate = now;
+        notifyListeners();
+        if (userId != null) {
+          _userRef.update({
+            'streakCount': streakCount,
+            'lastLoginDate': Timestamp.fromDate(now),
+          });
+        }
+        return true;
+      }
+      return false; // Aynı gün zaten artmış
     } else {
-      todaysIncorrectAnswers++;
+      // Hiç oyunu yok
+      streakCount = 1;
+      lastLoginDate = now;
+      notifyListeners();
+      if (userId != null) {
+        _userRef.update({
+          'streakCount': streakCount,
+          'lastLoginDate': Timestamp.fromDate(now),
+        });
+      }
+      return true;
     }
-    DatabaseHelper.instance.updateDailyStats(userId!, wasCorrect);
-    notifyListeners();
   }
 
-  Future<void> updateCoins(int value) async {
-    coins = value;
-    await _save();
+  Future<void> updateUserName(String newName) async {
+    userName = newName;
     notifyListeners();
+    if (userId != null) await _userRef.update({'userName': newName});
   }
 
-  Future<void> updateHearts(int value) async {
-    final oldHearts = hearts;
-    final newHearts = value.clamp(0, 5);
-    if (oldHearts == 5 && newHearts < 5) {
-      lastHeartTime = DateTime.now();
-    }
+  Future<void> updateAvatarPath(String path) async {
+    // EKSİK OLAN METOD
+    avatarPath = path;
+    notifyListeners();
+    if (userId != null) await _userRef.update({'avatarPath': path});
+  }
+
+  Future<void> updateHeartsAndLastTime(int newHearts, DateTime? newTime) async {
     hearts = newHearts;
-    await _save();
+    lastHeartTime = newTime;
     notifyListeners();
-  }
-
-  Future<void> updateStars(int value) async {
-    stars = value;
-    await _save();
-    notifyListeners();
-  }
-
-  Future<void> updateCurrentLevel(int value) async {
-    currentLevel = value;
-    if ((currentLevel - 1) % 10 == 0 && currentLevel > 1) {
-      stars = (currentLevel - 1) ~/ 10;
+    if (userId != null) {
+      await _userRef.update({
+        'hearts': newHearts,
+        'lastHeartTime': newTime != null ? Timestamp.fromDate(newTime) : null,
+      });
     }
-    await _save();
-    notifyListeners();
   }
 
-  Future<void> updateDailyGiftTaken(bool value) async {
-    dailyGiftTaken = value;
-    await _save();
-    notifyListeners();
+  Future<void> updateHearts(int newHearts) async {
+    await updateHeartsAndLastTime(newHearts, lastHeartTime);
   }
 
-  Future<void> updateLastDailyGiftTime(DateTime value) async {
-    lastDailyGiftTime = value;
-    await _save();
+  Future<void> updateLastHeartTime(DateTime time) async {
+    lastHeartTime = time;
     notifyListeners();
+    if (userId != null) {
+      await _userRef.update({'lastHeartTime': Timestamp.fromDate(time)});
+    }
   }
 
-  Future<void> updateLastHeartTime(DateTime value) async {
-    lastHeartTime = value;
-    await _save();
+  Future<void> addScore(int points) async {
+    totalScore += points;
     notifyListeners();
+    if (userId != null) await _userRef.update({'score': totalScore});
   }
 
-  Future<void> updateLastWheelSpinTime(DateTime value) async {
-    lastWheelSpinTime = value;
-    await _save();
-    notifyListeners();
+  Future<void> completeLevel(int levelPlayed) async {
+    if (levelPlayed == currentLevel) {
+      currentLevel++;
+      if (userId != null) await _userRef.update({'currentLevel': currentLevel});
+      if ((currentLevel - 1) % 10 == 0) {
+        stars = (currentLevel - 1) ~/ 10;
+        if (userId != null) await _userRef.update({'stars': stars});
+      }
+      notifyListeners();
+    }
   }
 
   Future<void> updateSoundSetting(bool value) async {
     isSoundOn = value;
-    await _save();
     notifyListeners();
+    if (userId != null) await _userRef.update({'isSoundOn': value});
   }
 
   Future<void> updateVibrationSetting(bool value) async {
     isVibrationOn = value;
-    await _save();
     notifyListeners();
+    if (userId != null) await _userRef.update({'isVibrationOn': value});
   }
 
-  Future<void> updateAvatarPath(String path) async {
-    avatarPath = path;
-    await _save();
-    notifyListeners();
+  Future<void> updateWordStats(String word, bool isCorrect) async {
+    // 1. Kelime istatistiklerini güncelle (Hafıza)
+    if (!wordStats.containsKey(word)) {
+      wordStats[word] = {'correct': 0, 'wrong': 0};
+    }
+
+    if (isCorrect) {
+      wordStats[word]!['correct'] = (wordStats[word]!['correct'] ?? 0) + 1;
+      // Eğer belirli bir eşiği geçerse "Known" olarak işaretle
+      if ((wordStats[word]!['correct'] ?? 0) > 3) {
+        if (!knownWords.contains(word)) knownWords.add(word);
+      }
+    } else {
+      wordStats[word]!['wrong'] = (wordStats[word]!['wrong'] ?? 0) + 1;
+    }
+
+    notifyListeners(); // Arayüzü güncelle
+
+    // 2. Firestore güncelle
+    if (userId != null) {
+      await _userRef.update({'wordStats': wordStats, 'knownWords': knownWords});
+    }
   }
 
-  Future<void> updateHeartsAndLastTime(int newHearts, DateTime newTime) async {
-    hearts = newHearts.clamp(0, 5);
-    lastHeartTime = newTime;
-    await _save();
+  Future<void> saveMistakesBatch(List<String> mistakes) async {
+    if (mistakes.isEmpty) return;
+
+    bool needsUpdate = false;
+    for (String word in mistakes) {
+      if (!wordStats.containsKey(word)) {
+        wordStats[word] = {'correct': 0, 'wrong': 0};
+      }
+      wordStats[word]!['wrong'] = (wordStats[word]!['wrong'] ?? 0) + 1;
+      needsUpdate = true;
+    }
+
+    if (needsUpdate) {
+      notifyListeners();
+      if (userId != null) {
+        await _userRef.update({'wordStats': wordStats});
+      }
+    }
+  }
+
+  Future<void> moveMistakeToKnown(String word) async {
+    // 1. Öğrenilenlere ekle (Eğer yoksa)
+    if (!knownWords.contains(word)) {
+      knownWords.add(word);
+    }
+
+    // 2. Hata listesinden tamamen çıkar
+    if (wordStats.containsKey(word)) {
+      wordStats.remove(word);
+    }
+
+    // 3. UI ve Veritabanı güncellemesi
+    notifyListeners();
+    if (userId != null) {
+      await _userRef.update({'knownWords': knownWords, 'wordStats': wordStats});
+    }
+  }
+
+  Future<void> moveKnownToMistake(String word) async {
+    // 1. Öğrenilenlerden tamamen çıkar
+    knownWords.remove(word);
+
+    // 2. Hata listesine yeniden ekle (En az 1 hatası olsun)
+    if (!wordStats.containsKey(word)) {
+      wordStats[word] = {'correct': 0, 'wrong': 1};
+    } else {
+      // Zaten varsa (nadir durum) wrong sayısını artır veya en az 1 yap
+      int currentWrong = wordStats[word]!['wrong'] ?? 0;
+      if (currentWrong == 0) {
+        wordStats[word]!['wrong'] = 1;
+      }
+    }
+
+    // 3. UI ve Veritabanı güncellemesi
+    notifyListeners();
+    if (userId != null) {
+      await _userRef.update({'knownWords': knownWords, 'wordStats': wordStats});
+    }
+  }
+
+  Stream<List<Map<String, dynamic>>> leaderboardStream() {
+    return _firestore
+        .collection('users')
+        .orderBy('score', descending: true)
+        .limit(20)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map((doc) => doc.data()).toList());
+  }
+
+  Future<void> recordAnswer(bool isCorrect) async {
+    if (isCorrect) {
+      todaysCorrectAnswers++;
+    } else {
+      todaysIncorrectAnswers++;
+    }
+    notifyListeners();
+    if (userId != null) {
+      await _userRef.update({
+        'todaysCorrectAnswers': todaysCorrectAnswers,
+        'todaysIncorrectAnswers': todaysIncorrectAnswers,
+      });
+    }
+  }
+
+  Future<void> markAsKnown(String word) async {
+    if (!knownWords.contains(word)) {
+      knownWords.add(word);
+      notifyListeners();
+      if (userId != null) await _userRef.update({'knownWords': knownWords});
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchQuizQuestions(String level) async {
+    return [];
+  }
+
+  Future<List<Map<String, String>>> fetchWordsForLevel(String level) async {
+    return [];
+  }
+
+  Future<void> seedDatabaseWithSampleQuizzes() async {
+    debugPrint("Seed fonksiyonu çağrıldı (Pasif Mod)");
+  }
+
+  Future<void> resetProgress() async {
+    if (userId == null) return;
+    try {
+      await _userRef.delete();
+      _resetLocalData();
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Reset hatası: $e");
+    }
+  }
+
+  Future<void> signOutAndReload() async {
+    await FirebaseAuth.instance.signOut();
+    _resetLocalData();
     notifyListeners();
   }
 }

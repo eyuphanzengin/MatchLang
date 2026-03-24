@@ -7,9 +7,56 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/user_data_provider.dart';
 import 'avatar_selection_screen.dart';
 import 'welcome_screen.dart';
+import 'login_screen.dart'; // Eklendi: Login sayfasına yönlendirme için
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
+
+  void _showEditNameDialog(BuildContext context, UserDataProvider userData) {
+    final TextEditingController controller = TextEditingController(
+      text: userData.userName,
+    );
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF2D2D2D), // Dark Dialog
+        title: const Text(
+          "Kullanıcı Adı Değiştir",
+          style: TextStyle(color: Colors.white),
+        ),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: "Yeni adınızı girin",
+            hintStyle: TextStyle(color: Colors.white38),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.white38),
+            ),
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.tealAccent),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("İptal", style: TextStyle(color: Colors.white60)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+            onPressed: () {
+              if (controller.text.trim().isNotEmpty) {
+                userData.updateUserName(controller.text.trim());
+              }
+              Navigator.pop(ctx);
+            },
+            child: const Text("Kaydet", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _signOut(BuildContext context) async {
     final confirmed = await showDialog<bool>(
@@ -82,6 +129,10 @@ class SettingsScreen extends StatelessWidget {
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
 
+    // Anonim kullanıcı kontrolü (Firebase üzerinden)
+    final user = FirebaseAuth.instance.currentUser;
+    final bool isGuest = user?.isAnonymous ?? false;
+
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
       extendBodyBehindAppBar: true,
@@ -100,7 +151,10 @@ class SettingsScreen extends StatelessWidget {
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Colors.blue.shade100, Colors.purple.shade100],
+            colors: [
+              const Color(0xFF1F1F1F),
+              const Color(0xFF2D2D2D),
+            ], // Dark Theme
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -116,16 +170,105 @@ class SettingsScreen extends StatelessWidget {
             _buildSectionHeader('Hesap', screenWidth),
             Card(
               elevation: 2,
+              color: Colors.white.withValues(alpha: 0.05), // Dark Transparent
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(screenWidth * 0.03),
               ),
-              child: _buildAccountSection(
-                context,
-                userData,
-                screenWidth,
-                screenHeight,
+              child: Column(
+                children: [
+                  // KULLANICI ADI (YENİ)
+                  ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.person, color: Colors.white),
+                    ),
+                    title: Text(
+                      userData.userName,
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                    subtitle: Text(
+                      "Kullanıcı Adı",
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        color: Colors.white60,
+                      ),
+                    ),
+                    trailing: const Icon(Icons.edit, color: Colors.white70),
+                    onTap: () => _showEditNameDialog(context, userData),
+                  ),
+                  const Divider(color: Colors.white24),
+                  _buildAccountSection(
+                    context,
+                    userData,
+                    screenWidth,
+                    screenHeight,
+                    isGuest,
+                  ),
+                ],
               ),
             ),
+
+            // --- EKLENEN KISIM BAŞLANGICI ---
+            if (isGuest) ...[
+              SizedBox(height: screenHeight * 0.03),
+              // Dikkat çekici Hesap Bağla Kartı
+              Card(
+                elevation: 3,
+                color: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(screenWidth * 0.03),
+                  side: BorderSide(color: Colors.grey.shade300, width: 1),
+                ),
+                child: ListTile(
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: screenWidth * 0.04,
+                    vertical: screenHeight * 0.01,
+                  ),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.link, color: Colors.grey.shade800),
+                  ),
+                  title: Text(
+                    'Hesap Bağla',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.normal,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'İlerlemeni kaybetmemek için giriş yap.',
+                    style: GoogleFonts.poppins(
+                      fontSize: screenWidth * 0.032,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                  trailing: Icon(
+                    Icons.arrow_forward_ios,
+                    size: 16,
+                    color: Colors.grey.shade600,
+                  ),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    );
+                  },
+                ),
+              ),
+            ],
+
+            // --- EKLENEN KISIM BİTİŞİ ---
             SizedBox(height: screenHeight * 0.03),
             _buildSectionHeader('Oyun Ayarları', screenWidth),
             Card(
@@ -143,7 +286,8 @@ class SettingsScreen extends StatelessWidget {
                     trailing: Switch(
                       value: userData.isSoundOn,
                       onChanged: (value) => userData.updateSoundSetting(value),
-                      activeColor: Colors.teal,
+                      activeTrackColor: Colors.tealAccent,
+                      activeThumbColor: Colors.white,
                     ),
                   ),
                   Divider(
@@ -158,12 +302,16 @@ class SettingsScreen extends StatelessWidget {
                       value: userData.isVibrationOn,
                       onChanged: (value) =>
                           userData.updateVibrationSetting(value),
-                      activeColor: Colors.teal,
+                      activeTrackColor: Colors.tealAccent,
+                      activeThumbColor: Colors.white,
                     ),
                   ),
                 ],
               ),
             ),
+            SizedBox(height: screenHeight * 0.03),
+
+            // AI Section Removed
             SizedBox(height: screenHeight * 0.03),
             _buildSectionHeader('Diğer', screenWidth),
             Card(
@@ -178,7 +326,8 @@ class SettingsScreen extends StatelessWidget {
                     title: 'İlerlemeyi Sıfırla',
                     onTap: () => _resetProgress(context),
                   ),
-                  if (userData.userId != 'guest_user') ...[
+                  // Eğer kullanıcı misafir değilse Çıkış Yap butonunu göster
+                  if (!isGuest) ...[
                     Divider(
                       height: 1,
                       indent: screenWidth * 0.04,
@@ -205,9 +354,9 @@ class SettingsScreen extends StatelessWidget {
     UserDataProvider userData,
     double screenWidth,
     double screenHeight,
+    bool isGuest, // Parametre olarak alındı
   ) {
     final user = FirebaseAuth.instance.currentUser;
-    final bool isGuest = userData.userId == 'guest_user';
 
     return Padding(
       padding: EdgeInsets.all(screenWidth * 0.04),
@@ -245,6 +394,7 @@ class SettingsScreen extends StatelessWidget {
                       style: GoogleFonts.poppins(
                         fontSize: screenWidth * 0.045,
                         fontWeight: FontWeight.bold,
+                        color: Colors.white,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -254,7 +404,7 @@ class SettingsScreen extends StatelessWidget {
                         user!.email!,
                         style: GoogleFonts.poppins(
                           fontSize: screenWidth * 0.035,
-                          color: Colors.grey.shade600,
+                          color: Colors.white70,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -272,27 +422,11 @@ class SettingsScreen extends StatelessWidget {
             ),
             style: FilledButton.styleFrom(
               minimumSize: Size.fromHeight(screenHeight * 0.055),
-              backgroundColor: Colors.grey.shade200,
-              foregroundColor: Colors.black87,
+              backgroundColor: Colors.white.withValues(alpha: 0.1),
+              foregroundColor: Colors.white,
             ),
             child: const Text('Avatar Değiştir'),
           ),
-          if (isGuest) ...[
-            SizedBox(height: screenHeight * 0.015),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.login),
-              label: const Text('İlerlemeyi Kaydetmek İçin Giriş Yap'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: Size.fromHeight(screenHeight * 0.055),
-                backgroundColor: Colors.blue.shade700,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(screenWidth * 0.03),
-                ),
-              ),
-              onPressed: () => Navigator.of(context).pushNamed('/login'),
-            ),
-          ],
         ],
       ),
     );
@@ -308,8 +442,8 @@ class SettingsScreen extends StatelessWidget {
         title,
         style: GoogleFonts.poppins(
           fontSize: screenWidth * 0.04,
-          fontWeight: FontWeight.bold,
-          color: Colors.black54,
+          fontWeight: FontWeight.w600,
+          color: Colors.white70,
         ),
       ),
     );
@@ -323,15 +457,14 @@ class SettingsScreen extends StatelessWidget {
     Color? color,
   }) {
     return ListTile(
-      leading: Icon(icon, color: color ?? Colors.grey.shade600),
+      leading: Icon(icon, color: color ?? Colors.white70),
       title: Text(
         title,
-        style: GoogleFonts.poppins(
-          color: color ?? Colors.black87,
-          fontWeight: FontWeight.w500,
-        ),
+        style: GoogleFonts.poppins(color: color ?? Colors.white, fontSize: 16),
       ),
-      trailing: trailing,
+      trailing:
+          trailing ??
+          Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white30),
       onTap: onTap,
     );
   }

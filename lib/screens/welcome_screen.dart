@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+// NO_CONTENT
 
 import 'login_screen.dart';
 import 'home_screen.dart';
-import '../models/user_data_provider.dart';
+// NO_CONTENT
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -17,14 +16,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   void initState() {
     super.initState();
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Provider.of<UserDataProvider>(context, listen: false).load();
-        }
-      });
-    }
+    // UserDataProvider zaten main.dart içinde init oluyor,
+    // burada manuel load çağırmaya gerek yok.
   }
 
   void _navigateToLogin(BuildContext context) {

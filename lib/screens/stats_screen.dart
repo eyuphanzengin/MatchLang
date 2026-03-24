@@ -1,180 +1,258 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:google_fonts/google_fonts.dart';
-
 import '../models/user_data_provider.dart';
 
-class StatsScreen extends StatelessWidget {
+class StatsScreen extends StatefulWidget {
   const StatsScreen({super.key});
 
   @override
+  State<StatsScreen> createState() => _StatsScreenState();
+}
+
+class _StatsScreenState extends State<StatsScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final userData = context.watch<UserDataProvider>();
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-
-    final correctAnswers = userData.todaysCorrectAnswers;
-    final incorrectAnswers = userData.todaysIncorrectAnswers;
-    final totalAnswers = correctAnswers + incorrectAnswers;
-
     return Scaffold(
-      extendBodyBehindAppBar: true,
+      backgroundColor: const Color(0xFF1F1F1F),
       appBar: AppBar(
-        title: const Text(
-          'İstatistiklerim',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        foregroundColor: Colors.white,
+        title: const Text("İstatistikler & Liderlik"),
         backgroundColor: Colors.transparent,
         elevation: 0,
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.indigo.shade800, Colors.cyan.shade700],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: Colors.amber,
+          labelColor: Colors.amber,
+          unselectedLabelColor: Colors.white60,
+          tabs: const [
+            Tab(text: "İstatistiklerim"),
+            Tab(text: "Liderlik Tablosu"),
+          ],
         ),
-        child: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: EdgeInsets.all(screenWidth * 0.05),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'Bugünkü Performansın',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(
-                      fontSize: screenWidth * 0.06,
-                      color: Colors.white,
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [_MyStatsTab(), _LeaderboardTab()],
+      ),
+    );
+  }
+}
+
+class _MyStatsTab extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final userData = context.watch<UserDataProvider>();
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            const SizedBox(height: 20),
+            // Günlük Seri Başlığı
+            Text(
+              "GÜNLÜK SERİ",
+              style: TextStyle(
+                color: Colors.grey.shade400,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Büyük Ateş İkonu ve Sayaç
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 150,
+                  height: 150,
+                  child: CircularProgressIndicator(
+                    value: 1.0,
+                    strokeWidth: 10,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+                Column(
+                  children: [
+                    const Icon(
+                      Icons.local_fire_department,
+                      color: Colors.orange,
+                      size: 50,
+                    ),
+                    Text(
+                      "${userData.todaysCorrectAnswers > 0 ? 1 : 0}",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 40,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // Seviye Kutusu
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                "Seviye ${userData.currentLevel}",
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 40),
+
+            // İstatistik Kartları (Doğru/Yanlış vb.)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildStatCard(
+                  "Doğru",
+                  "${userData.todaysCorrectAnswers}",
+                  Colors.green,
+                ),
+                _buildStatCard(
+                  "Yanlış",
+                  "${userData.todaysIncorrectAnswers}",
+                  Colors.red,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String title, String value, Color color) {
+    return Container(
+      width: 100,
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade800,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: color.withAlpha(100), width: 2),
+      ),
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            title,
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LeaderboardTab extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: context.read<UserDataProvider>().leaderboardStream(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Text(
+              "Hata: ${snapshot.error}",
+              style: const TextStyle(color: Colors.white),
+            ),
+          );
+        }
+
+        final users = snapshot.data ?? [];
+        if (users.isEmpty) {
+          return const Center(
+            child: Text(
+              "Liderlik tablosu boş",
+              style: TextStyle(color: Colors.white),
+            ),
+          );
+        }
+
+        return ListView.builder(
+          itemCount: users.length,
+          padding: const EdgeInsets.all(16),
+          itemBuilder: (context, index) {
+            final user = users[index];
+            final score = user['score'] ?? 0;
+            final isTop3 = index < 3;
+
+            return Card(
+              color: isTop3
+                  ? Colors.amber.withValues(alpha: 0.2)
+                  : Colors.white.withValues(alpha: 0.05),
+              margin: const EdgeInsets.only(bottom: 10),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: isTop3 ? Colors.amber : Colors.grey,
+                  child: Text(
+                    "${index + 1}",
+                    style: const TextStyle(
+                      color: Colors.black,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  SizedBox(height: screenHeight * 0.04),
-                  SizedBox(
-                    height: screenWidth * 0.5,
-                    width: screenWidth * 0.5,
-                    child: totalAnswers == 0
-                        ? _buildEmptyChart(screenWidth)
-                        : _buildPieChart(
-                            correctAnswers,
-                            incorrectAnswers,
-                            screenWidth,
-                          ),
+                ),
+                title: Text(
+                  "${user['userName'] ?? user['email'] ?? 'Kullanıcı'}",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
                   ),
-                  SizedBox(height: screenHeight * 0.05),
-                  _buildStatRow(
-                    Colors.green,
-                    'Doğru Cevap',
-                    correctAnswers,
-                    screenWidth,
+                ),
+                subtitle: isTop3
+                    ? const Text(
+                        "🏆 Gelecek hafta üst lige yükselecek!",
+                        style: TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 12,
+                        ),
+                      )
+                    : null,
+                trailing: Text(
+                  "$score P",
+                  style: const TextStyle(
+                    color: Colors.amberAccent,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
                   ),
-                  SizedBox(height: screenHeight * 0.02),
-                  _buildStatRow(
-                    Colors.red,
-                    'Yanlış Cevap',
-                    incorrectAnswers,
-                    screenWidth,
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPieChart(int correct, int incorrect, double screenWidth) {
-    return PieChart(
-      PieChartData(
-        sections: [
-          PieChartSectionData(
-            color: Colors.green.shade400,
-            value: correct.toDouble(),
-            title: '$correct',
-            radius: screenWidth * 0.2,
-            titleStyle: TextStyle(
-              fontSize: screenWidth * 0.045,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          PieChartSectionData(
-            color: Colors.red.shade400,
-            value: incorrect.toDouble(),
-            title: '$incorrect',
-            radius: screenWidth * 0.2,
-            titleStyle: TextStyle(
-              fontSize: screenWidth * 0.045,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-        ],
-        sectionsSpace: 2,
-        centerSpaceRadius: screenWidth * 0.1,
-      ),
-    );
-  }
-
-  Widget _buildEmptyChart(double screenWidth) {
-    return PieChart(
-      PieChartData(
-        sections: [
-          PieChartSectionData(
-            color: Colors.grey.shade700,
-            value: 1,
-            title: '?',
-            radius: screenWidth * 0.2,
-            titleStyle: TextStyle(
-              fontSize: screenWidth * 0.045,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-        ],
-        sectionsSpace: 0,
-        centerSpaceRadius: screenWidth * 0.1,
-      ),
-    );
-  }
-
-  Widget _buildStatRow(
-    Color color,
-    String label,
-    int value,
-    double screenWidth,
-  ) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Container(
-          width: screenWidth * 0.04,
-          height: screenWidth * 0.04,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        SizedBox(width: screenWidth * 0.03),
-        Text(
-          '$label:',
-          style: GoogleFonts.poppins(
-            fontSize: screenWidth * 0.045,
-            color: Colors.white70,
-          ),
-        ),
-        const Spacer(),
-        Text(
-          '$value',
-          style: GoogleFonts.poppins(
-            fontSize: screenWidth * 0.05,
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ],
+            );
+          },
+        );
+      },
     );
   }
 }

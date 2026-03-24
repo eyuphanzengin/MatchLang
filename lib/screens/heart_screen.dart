@@ -68,22 +68,6 @@ class _HeartScreenState extends State<HeartScreen> {
     return '$minutes:$seconds';
   }
 
-  void _buyHeart() async {
-    final userData = context.read<UserDataProvider>();
-    if (userData.hearts >= 5) return;
-    if (userData.coins >= 20) {
-      await userData.updateCoins(userData.coins - 20);
-      await userData.updateHearts(userData.hearts + 1);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Yeterli coininiz yok!'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final userData = context.watch<UserDataProvider>();
@@ -207,7 +191,7 @@ class _HeartScreenState extends State<HeartScreen> {
               ),
             ],
             Text(
-              areHeartsFull ? 'Canların Tam Dolu!' : 'Canın mı Bitti?',
+              areHeartsFull ? 'Hazırsın!' : 'Dinlenme Zamanı',
               textAlign: TextAlign.center,
               style: GoogleFonts.poppins(
                 fontSize: screenWidth * 0.05,
@@ -215,35 +199,18 @@ class _HeartScreenState extends State<HeartScreen> {
                 color: Colors.white,
               ),
             ),
-            SizedBox(height: screenHeight * 0.006),
-            if (!areHeartsFull)
-              Text(
-                '20 Coin karşılığında bir can al.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(
-                  fontSize: screenWidth * 0.04,
-                  color: Colors.white.withAlpha(200),
-                ),
-              ),
-            SizedBox(height: screenHeight * 0.02),
-            FilledButton.icon(
-              onPressed: areHeartsFull ? null : _buyHeart,
-              icon: Icon(Icons.monetization_on, size: screenWidth * 0.06),
-              label: const Text('Satın Al'),
-              style: FilledButton.styleFrom(
-                padding: EdgeInsets.symmetric(
-                  horizontal: screenWidth * 0.14,
-                  vertical: screenHeight * 0.018,
-                ),
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.orange.shade800,
-                disabledBackgroundColor: Colors.grey.withAlpha(128),
-                textStyle: GoogleFonts.poppins(
-                  fontSize: screenWidth * 0.04,
-                  fontWeight: FontWeight.bold,
-                ),
+            SizedBox(height: screenHeight * 0.01),
+            Text(
+              areHeartsFull 
+                  ? 'Enerjin tam, öğrenmeye devam et!' 
+                  : 'Canların her 10 dakikada bir yenilenir.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(
+                fontSize: screenWidth * 0.035,
+                color: Colors.white.withAlpha(200),
               ),
             ),
+            // Satın al butonu kaldırıldı.
           ],
         ),
       ),

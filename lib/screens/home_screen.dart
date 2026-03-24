@@ -1,13 +1,13 @@
 import 'dart:async';
+import 'dart:math';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-import 'game_screen.dart';
-import 'settings_screen.dart';
-import 'store_screen.dart';
-import 'stats_screen.dart';
-import 'wheel_screen.dart';
+// game_screen.dart removed
+import 'quiz_screen.dart';
 import 'heart_screen.dart';
 import 'star_screen.dart';
 
@@ -20,11 +20,13 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final ScrollController _scrollController = ScrollController();
   Timer? _heartTimer;
   final int heartIntervalMinutes = 10;
-  bool _isInitialScrollPerformed = false;
+  // FLAG REMOVED
+  late AnimationController _floatingController;
+  int _lastAutoScrolledLevel = -1;
 
   @override
   void initState() {
@@ -32,16 +34,23 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setupHeartTimer();
     });
+
+    _floatingController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
   }
 
   @override
   void dispose() {
     _heartTimer?.cancel();
     _scrollController.dispose();
+    _floatingController.dispose();
     super.dispose();
   }
 
   void _setupHeartTimer() {
+    if (!mounted) return;
     final userData = context.read<UserDataProvider>();
     if (userData.lastHeartTime == null) {
       userData.updateLastHeartTime(DateTime.now());
@@ -70,401 +79,227 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  int getWordLevel(int level) {
-    if (level <= 10) return 1;
-    if (level <= 20) return 2;
-    if (level <= 30) return 3;
-    if (level <= 40) return 5;
-    if (level <= 50) return 6;
-    if (level <= 60) return 7;
-    if (level <= 70) return 8;
-    if (level <= 80) return 9;
-    if (level <= 90) return 10;
-    if (level <= 100) return 11;
-    return 5;
-  }
-
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-
-    final double topSectionHeight = screenHeight * 0.16;
+    final double topSectionHeight = 100.0;
+    final double itemSpacing = 160.0;
 
     return Consumer<UserDataProvider>(
       builder: (context, userData, child) {
-        if (userData.userId != null && !_isInitialScrollPerformed) {
+        if (userData.userId != null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted && _scrollController.hasClients) {
-              final double itemHeight = (screenWidth * 0.26) + 36;
-
-              final double viewportHeight =
-                  _scrollController.position.viewportDimension;
-              double centerOffset = (userData.currentLevel + 1) * itemHeight;
-              centerOffset =
-                  centerOffset - (viewportHeight / 2) + (itemHeight / 2);
-
-              final double maxScroll =
-                  _scrollController.position.maxScrollExtent;
-              final double finalOffset = centerOffset.clamp(0.0, maxScroll);
-              _scrollController.jumpTo(finalOffset);
-              _isInitialScrollPerformed = true;
+              if (userData.currentLevel != _lastAutoScrolledLevel) {
+                double offset = (userData.currentLevel - 2.5) * itemSpacing;
+                if (offset < 0) offset = 0;
+                if (offset > _scrollController.position.maxScrollExtent) {
+                  offset = _scrollController.position.maxScrollExtent;
+                }
+                _scrollController.jumpTo(offset);
+                _lastAutoScrolledLevel = userData.currentLevel;
+              }
             }
           });
         }
-        return Scaffold(
-          body: SafeArea(
-            top: false,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Image.asset(
-                    'assets/images/background.png',
-                    fit: BoxFit.cover,
-                  ),
-                ),
-                Padding(
-                  padding: EdgeInsets.only(top: topSectionHeight),
-                  child: Center(
-                    child: SizedBox(
-                      width: screenWidth * 0.3,
-                      child: NotificationListener<OverscrollIndicatorNotification>(
-                        onNotification: (overscroll) {
-                          overscroll.disallowIndicator();
-                          return true;
-                        },
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.only(bottom: 100, top: 20),
-                          reverse: true,
-                          itemCount: 100,
-                          itemBuilder: (context, index) {
-                            final level = index + 1;
-                            final isActive = level == userData.currentLevel;
-                            final isPlayable = level <= userData.currentLevel;
-                            final isPreview =
-                                level > userData.currentLevel &&
-                                level <= userData.currentLevel + 3;
-                            final isBossLevel = level % 10 == 0;
 
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 18),
-                              child: GestureDetector(
-                                onTap: isPlayable
-                                    ? () {
-                                        if (userData.hearts <= 0) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Canınız bitti. Lütfen mağazadan can satın alın.',
-                                              ),
-                                            ),
-                                          );
-                                          return;
-                                        }
-                                        Navigator.push(
+        return Scaffold(
+          extendBodyBehindAppBar: true,
+          backgroundColor: const Color(0xFF121212),
+          body: Stack(
+            children: [
+              Positioned.fill(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF1F1C2C), Color(0xFF928DAB)],
+                      begin: Alignment.bottomLeft,
+                      end: Alignment.topRight,
+                    ),
+                  ),
+                  child: CustomPaint(painter: CyberGridPainter()),
+                ),
+              ),
+
+              Positioned.fill(
+                top: 0,
+                child: ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.only(bottom: 200, top: 150),
+                  itemCount: 100,
+                  itemBuilder: (context, index) {
+                    final level = index + 1;
+                    final isPlayable = level <= userData.currentLevel;
+                    final isBossLevel = level % 10 == 0;
+                    final isCompleted = level < userData.currentLevel;
+                    final isActive = level == userData.currentLevel;
+
+                    final double xOffset =
+                        sin(index / 1.8) * (screenWidth * 0.22);
+                    double? prevXOffset;
+                    if (index < 99) {
+                      prevXOffset =
+                          sin((index + 1) / 1.8) * (screenWidth * 0.22);
+                    }
+
+                    return SizedBox(
+                      height: itemSpacing,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        alignment: Alignment.center,
+                        children: [
+                          if (prevXOffset != null)
+                            CustomPaint(
+                              size: Size(screenWidth, itemSpacing),
+                              painter: NeonPathPainter(
+                                startX: xOffset,
+                                endX: prevXOffset,
+                                isPassed: isCompleted,
+                                color: isCompleted
+                                    ? Colors.cyanAccent
+                                    : Colors.grey.withValues(alpha: 0.3),
+                              ),
+                            ),
+                          Transform.translate(
+                            offset: Offset(xOffset, 0),
+                            child: GestureDetector(
+                              onTap: isPlayable
+                                  ? () {
+                                      if (userData.hearts <= 0) {
+                                        ScaffoldMessenger.of(
                                           context,
-                                          MaterialPageRoute(
-                                            builder: (_) => GameScreen(
-                                              level: level,
-                                              wordLevel: getWordLevel(level),
-                                              onLevelComplete:
-                                                  (nextLevel) async {
-                                                    if (isActive &&
-                                                        nextLevel >
-                                                            userData
-                                                                .currentLevel) {
-                                                      await userData
-                                                          .updateCurrentLevel(
-                                                            nextLevel,
-                                                          );
-                                                    }
-                                                    final coinsToAdd = isActive
-                                                        ? 20
-                                                        : 10;
-                                                    await userData.updateCoins(
-                                                      userData.coins +
-                                                          coinsToAdd,
-                                                    );
-                                                  },
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Enerjiniz bitti. Dinlenme vakti!',
                                             ),
                                           ),
                                         );
+                                        return;
                                       }
-                                    : null,
-                                child: Container(
-                                  width: screenWidth * 0.22,
-                                  height: screenWidth * 0.26,
-                                  decoration: BoxDecoration(
-                                    color: isBossLevel
-                                        ? Colors.red.shade500
-                                        : (isActive
-                                              ? Colors.green
-                                              : (isPlayable
-                                                    ? Colors.blue
-                                                    : (isPreview
-                                                          ? Colors.grey.shade600
-                                                          : Colors
-                                                                .grey
-                                                                .shade800))),
-                                    shape: BoxShape.circle,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withAlpha(50),
-                                        blurRadius: 4,
-                                        offset: const Offset(2, 2),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Center(
-                                    child: (isPlayable || isPreview)
-                                        ? Text(
-                                            '$level',
-                                            style: TextStyle(
-                                              fontSize: screenWidth * 0.08,
-                                              fontWeight: FontWeight.bold,
-                                              color: isBossLevel
-                                                  ? Colors.white
-                                                  : Colors.white.withAlpha(
-                                                      (isPlayable ? 255 : 153),
-                                                    ),
-                                            ),
-                                          )
-                                        : Icon(
-                                            Icons.lock,
-                                            color: Colors.white.withAlpha(178),
-                                            size: screenWidth * 0.08,
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => QuizScreen(
+                                            level: "A${(level / 10).ceil()}",
+                                            levelIndex: level,
                                           ),
+                                        ),
+                                      );
+                                    }
+                                  : null,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                clipBehavior: Clip.none,
+                                children: [
+                                  HexagonLevelNode(
+                                    level: level,
+                                    isActive: isActive,
+                                    isLocked: !isPlayable,
+                                    isBoss: isBossLevel,
+                                    isCompleted: isCompleted,
                                   ),
-                                ),
+                                  if (isActive)
+                                    AnimatedBuilder(
+                                      animation: _floatingController,
+                                      builder: (context, child) {
+                                        return Positioned(
+                                          top:
+                                              -85 +
+                                              (sin(
+                                                    _floatingController.value *
+                                                        2 *
+                                                        pi,
+                                                  ) *
+                                                  6),
+                                          child: child!,
+                                        );
+                                      },
+                                      child: _buildAvatar(userData),
+                                    ),
+                                ],
                               ),
-                            );
-                          },
-                        ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: ClipRRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      height: topSectionHeight,
+                      color: Colors.black.withValues(alpha: 0.2),
+                      alignment: Alignment.bottomCenter,
+                      padding: const EdgeInsets.only(
+                        bottom: 20,
+                        left: 20,
+                        right: 20,
+                      ),
+                      child: Center(
+                        child: buildTopButtonsRow(user, context, userData),
                       ),
                     ),
                   ),
                 ),
-                Positioned(
-                  top: topSectionHeight - 1,
-                  left: 0,
-                  right: 0,
-                  child: Container(height: 2),
-                ),
-                Positioned(
-                  top: screenHeight * 0.05,
-                  left: 0,
-                  right: 0,
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: screenWidth * 0.015,
-                    ),
-                    child: buildTopButtonsRow(
-                      user,
-                      context,
-                      screenWidth,
-                      userData,
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: screenHeight * 0.26,
-                  right: screenWidth * 0.03,
-                  child: Column(
-                    children: [
-                      buildSideButton(
-                        context,
-                        screenWidth,
-                        imagePath: 'assets/images/store.png',
-                        label: 'Mağaza',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const StoreScreen(),
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: screenHeight * 0.06),
-                      buildSideButton(
-                        context,
-                        screenWidth,
-                        imagePath: 'assets/images/stats.png',
-                        label: 'İstatistik',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const StatsScreen(),
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: screenHeight * 0.06),
-                      buildSideButton(
-                        context,
-                        screenWidth,
-                        imagePath: 'assets/images/spin.png',
-                        label: 'Çark Çevir',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const WheelScreen(),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         );
       },
     );
   }
 
-  Widget buildTopButtonsRow(
-    User? user,
-    BuildContext context,
-    double screenWidth,
-    UserDataProvider userData,
-  ) {
-    final List<Map<String, dynamic>> buttonData = [
-      {
-        "icon": "assets/images/coin.png",
-        "value": userData.coins,
-        "route": "store",
-      },
-      {
-        "icon": "assets/images/heart.png",
-        "value": userData.hearts,
-        "route": "heart",
-      },
-      {
-        "icon": "assets/images/star.png",
-        "value": userData.stars,
-        "route": "star",
-      },
-    ];
+  Widget _buildAvatar(UserDataProvider userData) {
+    String assetPath = 'assets/avatars/avatar1.png';
+    if (userData.avatarPath != null && userData.avatarPath!.isNotEmpty) {
+      assetPath = userData.avatarPath!;
+    }
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      crossAxisAlignment: CrossAxisAlignment.center,
+    return Column(
       children: [
-        ...buttonData.map((data) {
-          final bool isCoinButton = data["route"] == "store";
-          final double buttonWidth = isCoinButton
-              ? screenWidth * 0.28
-              : screenWidth * 0.20;
-          final double iconSize = isCoinButton ? 32 : 28;
-
-          Border? buttonBorder;
-          if (data["route"] == "store") {
-            buttonBorder = Border.all(color: Colors.amber.shade600, width: 2.5);
-          } else if (data["route"] == "heart") {
-            buttonBorder = Border.all(color: Colors.red.shade400, width: 2.5);
-          } else if (data["route"] == "star") {
-            buttonBorder = Border.all(
-              color: Colors.yellow.shade700,
-              width: 2.5,
-            );
-          }
-
-          return GestureDetector(
-            onTap: () {
-              if (data["route"] == "store") {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const StoreScreen()),
-                );
-              } else if (data["route"] == "heart") {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const HeartScreen()),
-                );
-              } else if (data["route"] == "star") {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const StarScreen()),
-                );
-              }
-            },
-            child: Container(
-              width: buttonWidth,
-              height: 60,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                border: buttonBorder,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Image.asset(data["icon"], width: iconSize, height: iconSize),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        data["value"].toString(),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(15),
+            boxShadow: [const BoxShadow(color: Colors.black26, blurRadius: 4)],
+          ),
+          child: Text(
+            "Hazır mısın?",
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
             ),
-          );
-        }),
-        GestureDetector(
-          onTap: () async {
-            final result = await Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const SettingsScreen()),
-            );
-
-            if (result == true && mounted && _scrollController.hasClients) {
-              _scrollController.animateTo(
-                0.0,
-                duration: const Duration(milliseconds: 500),
-                curve: Curves.easeInOut,
-              );
-            }
-          },
-          child: Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white,
-              border: Border.all(color: Colors.blue.shade400, width: 2.5),
-            ),
-            child: ClipOval(
-              child: userData.avatarPath != null
-                  ? Image.asset(
-                      userData.avatarPath!,
-                      fit: BoxFit.cover,
-                      width: 60,
-                      height: 60,
-                    )
-                  : (user != null && user.photoURL != null
-                        ? Image.network(user.photoURL!, fit: BoxFit.cover)
-                        : Center(
-                            child: Text(
-                              user?.displayName
-                                      ?.substring(0, 1)
-                                      .toUpperCase() ??
-                                  '?',
-                              style: const TextStyle(
-                                fontSize: 24,
-                                color: Colors.orange,
-                              ),
-                            ),
-                          )),
+          ),
+        ),
+        const SizedBox(height: 5),
+        Container(
+          height: 60,
+          width: 60,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.4),
+                blurRadius: 10,
+                offset: const Offset(0, 5),
+              ),
+            ],
+            image: DecorationImage(
+              image: AssetImage(assetPath),
+              fit: BoxFit.cover,
             ),
           ),
         ),
@@ -472,35 +307,266 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget buildSideButton(
+  Widget buildTopButtonsRow(
+    User? user,
     BuildContext context,
-    double screenWidth, {
-    required String imagePath,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    final double buttonSize = screenWidth * 0.17;
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
+    UserDataProvider userData,
+  ) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            width: buttonSize,
-            height: buttonSize,
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
-            child: Image.asset(imagePath, fit: BoxFit.contain),
+          _buildStatusChip(
+            context,
+            icon: Icons.local_fire_department_rounded,
+            color: Colors.deepOrangeAccent,
+            value: "${userData.streakCount}",
+            label: "Seri",
+            onTap: () {},
           ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
+          const SizedBox(width: 15),
+          _buildStatusChip(
+            context,
+            icon: Icons.favorite_rounded,
+            color: const Color(0xFFFF5252),
+            value: "${userData.hearts}",
+            label: "Can",
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const HeartScreen()),
+            ),
+          ),
+          const SizedBox(width: 20), // Artırılmış boşluk
+          _buildStatusChip(
+            context,
+            icon: Icons.bolt_rounded,
+            color: Colors.amber,
+            value: "${userData.totalScore}",
+            label: "Puan",
+            onTap: () {},
+          ),
+          const SizedBox(width: 20), // Artırılmış boşluk
+          _buildStatusChip(
+            context,
+            icon: Icons.stars_rounded,
+            color: const Color(0xFFFFD740),
+            value: "${userData.stars}",
+            label: "Rütbe",
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const StarScreen()),
             ),
           ),
         ],
       ),
     );
   }
+
+  Widget _buildStatusChip(
+    BuildContext context, {
+    required IconData icon,
+    required Color color,
+    required String value,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2A2A35),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(color: Colors.white12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(width: 8),
+            Text(
+              value,
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class HexagonLevelNode extends StatelessWidget {
+  final int level;
+  final bool isActive;
+  final bool isLocked;
+  final bool isBoss;
+  final bool isCompleted;
+
+  const HexagonLevelNode({
+    super.key,
+    required this.level,
+    required this.isActive,
+    required this.isLocked,
+    required this.isBoss,
+    required this.isCompleted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color baseColor = isLocked
+        ? const Color(0xFF424242)
+        : (isBoss
+              ? const Color(0xFFFF9100)
+              : (isCompleted
+                    ? const Color(0xFF00E676)
+                    : const Color(0xFF2979FF)));
+
+    final double size = isBoss ? 80.0 : 70.0;
+    // elevation removed
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: baseColor,
+            shape: BoxShape.circle,
+            boxShadow: [
+              if (!isLocked)
+                BoxShadow(
+                  color: baseColor.withValues(alpha: isActive ? 0.6 : 0.3),
+                  blurRadius: isActive ? 20 : 10,
+                  spreadRadius: isActive ? 2 : 0,
+                ),
+              const BoxShadow(
+                color: Colors.black54,
+                blurRadius: 0,
+                offset: Offset(0, 6),
+              ),
+            ],
+            border: isActive
+                ? Border.all(color: Colors.white, width: 4)
+                : Border.all(color: Colors.white24, width: 2),
+          ),
+          child: Center(
+            child: isLocked
+                ? Icon(
+                    Icons.lock_rounded,
+                    color: Colors.white38,
+                    size: size * 0.4,
+                  )
+                : (isBoss
+                      ? const Icon(
+                          Icons.emoji_events_rounded,
+                          color: Colors.white,
+                          size: 36,
+                        )
+                      : Text(
+                          "$level",
+                          style: GoogleFonts.rubik(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                          ),
+                        )),
+          ),
+        ),
+        if (isActive)
+          Padding(
+            padding: const EdgeInsets.only(top: 15.0),
+            child: Container(
+              width: 40,
+              height: 10,
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                borderRadius: const BorderRadius.all(Radius.elliptical(40, 10)),
+                boxShadow: [
+                  BoxShadow(
+                    color: baseColor.withValues(alpha: 0.5),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class NeonPathPainter extends CustomPainter {
+  final double startX;
+  final double endX;
+  final bool isPassed;
+  final Color color;
+
+  NeonPathPainter({
+    required this.startX,
+    required this.endX,
+    required this.isPassed,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = isPassed ? 6 : 4
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final path = Path();
+    final p1 = Offset((size.width / 2) + startX, size.height / 2);
+    final p2 = Offset((size.width / 2) + endX, size.height * 1.5);
+
+    path.moveTo(p1.dx, p1.dy);
+    final controlPoint = Offset((p1.dx + p2.dx) / 2, size.height);
+    path.quadraticBezierTo(controlPoint.dx, controlPoint.dy, p2.dx, p2.dy);
+
+    if (isPassed) {
+      final glowPaint = Paint()
+        ..color = color.withValues(alpha: 0.5)
+        ..strokeWidth = 12
+        ..style = PaintingStyle.stroke
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+      canvas.drawPath(path, glowPaint);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+class CyberGridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.03)
+      ..strokeWidth = 1;
+
+    for (double i = 0; i < size.width; i += 40) {
+      canvas.drawLine(Offset(i, 0), Offset(i, size.height), paint);
+    }
+    for (double i = 0; i < size.height; i += 40) {
+      canvas.drawLine(Offset(0, i), Offset(size.width, i), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
