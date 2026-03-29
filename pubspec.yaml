@@ -30,7 +30,7 @@ dependencies:
   # Görsel & Tasarım
   flutter_screenutil: ^5.9.3
   cupertino_icons: ^1.0.9
-  google_fonts: ^8.0.2  # Hataları çözen en kritik güncelleme
+  google_fonts: ^8.0.2 # Hataları çözen en kritik güncelleme
   fl_chart: ^1.2.0
 
   # Ses ve Konuşma

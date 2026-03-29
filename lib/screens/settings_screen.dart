@@ -81,7 +81,7 @@ class SettingsScreen extends StatelessWidget {
 
     if (confirmed != true || !context.mounted) return;
 
-    await GoogleSignIn().signOut();
+    await GoogleSignIn.instance.signOut();
     await FirebaseAuth.instance.signOut();
 
     if (!context.mounted) return;
@@ -279,9 +279,8 @@ class SettingsScreen extends StatelessWidget {
               child: Column(
                 children: [
                   _buildSettingsTile(
-                    icon: userData.isSoundOn
-                        ? Icons.volume_up
-                        : Icons.volume_off,
+                    icon:
+                        userData.isSoundOn ? Icons.volume_up : Icons.volume_off,
                     title: 'Ses Efektleri',
                     trailing: Switch(
                       value: userData.isSoundOn,
@@ -369,11 +368,10 @@ class SettingsScreen extends StatelessWidget {
                 backgroundImage: userData.avatarPath != null
                     ? AssetImage(userData.avatarPath!) as ImageProvider
                     : (!isGuest && user?.photoURL != null
-                          ? NetworkImage(user!.photoURL!)
-                          : null),
+                        ? NetworkImage(user!.photoURL!)
+                        : null),
                 backgroundColor: Colors.grey.shade400,
-                child:
-                    (userData.avatarPath == null &&
+                child: (userData.avatarPath == null &&
                         (isGuest || user?.photoURL == null))
                     ? Icon(
                         isGuest ? Icons.person_off : Icons.person,
@@ -462,8 +460,7 @@ class SettingsScreen extends StatelessWidget {
         title,
         style: GoogleFonts.poppins(color: color ?? Colors.white, fontSize: 16),
       ),
-      trailing:
-          trailing ??
+      trailing: trailing ??
           Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white30),
       onTap: onTap,
     );

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'dart:async';
 
 import '../models/user_data_provider.dart';
 import 'main_screen.dart';
@@ -21,15 +22,14 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _signInWithGoogle() async {
     setState(() => _isLoading = true);
     try {
-      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
-      if (googleUser == null) {
-        setState(() => _isLoading = false);
-        return; // Kullanıcı iptal etti
-      }
+      final GoogleSignIn googleSignIn = GoogleSignIn.instance;
+      final GoogleSignInAccount googleUser = await googleSignIn.authenticate();
 
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth = googleUser.authentication;
+      final GoogleSignInClientAuthorization clientAuth =
+          await googleUser.authorizationClient.authorizeScopes(['email']);
       final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
+        accessToken: clientAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
@@ -52,17 +52,20 @@ class _LoginScreenState extends State<LoginScreen> {
   // --- ORTAK GİRİŞ FONKSİYONU ---
   Future<void> _signIn(AuthCredential credential) async {
     try {
-      final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+      final userCredential =
+          await FirebaseAuth.instance.signInWithCredential(credential);
 
       if (!mounted) return;
       // Misafir verilerini yeni hesaba aktar
-      await context.read<UserDataProvider>().mergeGuestDataToNewUser(userCredential.user!.uid);
+      await context
+          .read<UserDataProvider>()
+          .mergeGuestDataToNewUser(userCredential.user!.uid);
 
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (_) => const MainScreen()),
-            (route) => false,
+        (route) => false,
       );
     } on FirebaseAuthException catch (e) {
       _showError(e.message ?? 'Giriş hatası');
@@ -127,7 +130,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               SizedBox(height: subtitleToButtonSpacing),
-
               if (_isLoading)
                 const CircularProgressIndicator(color: Colors.white)
               else ...[
@@ -180,7 +182,9 @@ class _LoginScreenState extends State<LoginScreen> {
           backgroundColor: backgroundColor,
           foregroundColor: foregroundColor,
           elevation: hasBorder ? 0 : 2,
-          side: hasBorder ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+          side: hasBorder
+              ? const BorderSide(color: Colors.white, width: 2)
+              : BorderSide.none,
           padding: EdgeInsets.symmetric(vertical: buttonVerticalPadding),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(15),
@@ -247,12 +251,14 @@ class _EmailAuthSheetState extends State<EmailAuthSheet> {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
         if (!mounted) return;
-        await context.read<UserDataProvider>().mergeGuestDataToNewUser(user.uid);
+        await context
+            .read<UserDataProvider>()
+            .mergeGuestDataToNewUser(user.uid);
         if (!mounted) return;
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => const MainScreen()),
-              (route) => false,
+          (route) => false,
         );
       }
     } on FirebaseAuthException catch (e) {
@@ -278,7 +284,8 @@ class _EmailAuthSheetState extends State<EmailAuthSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.fromLTRB(30, 30, 30, MediaQuery.of(context).viewInsets.bottom + 30),
+      padding: EdgeInsets.fromLTRB(
+          30, 30, 30, MediaQuery.of(context).viewInsets.bottom + 30),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
@@ -291,39 +298,49 @@ class _EmailAuthSheetState extends State<EmailAuthSheet> {
           children: [
             Text(
               _isLogin ? "Giriş Yap" : "Hesap Oluştur",
-              style: GoogleFonts.poppins(color: Colors.orange.shade800, fontSize: 26, fontWeight: FontWeight.bold),
+              style: GoogleFonts.poppins(
+                  color: Colors.orange.shade800,
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 30),
             TextFormField(
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
-              validator: (val) => val != null && val.contains('@') ? null : 'Geçerli e-posta girin',
+              validator: (val) => val != null && val.contains('@')
+                  ? null
+                  : 'Geçerli e-posta girin',
               decoration: InputDecoration(
                 labelText: "E-posta",
                 prefixIcon: const Icon(Icons.email, color: Colors.orange),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
             const SizedBox(height: 20),
             TextFormField(
               controller: _passwordController,
               obscureText: true,
-              validator: (val) => val != null && val.length >= 6 ? null : 'En az 6 karakter',
+              validator: (val) =>
+                  val != null && val.length >= 6 ? null : 'En az 6 karakter',
               decoration: InputDecoration(
                 labelText: "Şifre",
                 prefixIcon: const Icon(Icons.lock, color: Colors.orange),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
             const SizedBox(height: 20),
             if (_errorMessage != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+                child: Text(_errorMessage!,
+                    style: const TextStyle(color: Colors.red)),
               ),
             if (_loading)
-              const Center(child: CircularProgressIndicator(color: Colors.orange))
+              const Center(
+                  child: CircularProgressIndicator(color: Colors.orange))
             else
               ElevatedButton(
                 onPressed: _submit,
@@ -331,7 +348,8 @@ class _EmailAuthSheetState extends State<EmailAuthSheet> {
                   backgroundColor: Colors.orange,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15)),
                 ),
                 child: Text(_isLogin ? "Giriş Yap" : "Kaydol"),
               ),
@@ -343,7 +361,9 @@ class _EmailAuthSheetState extends State<EmailAuthSheet> {
                 });
               },
               child: Text(
-                _isLogin ? "Hesabın yok mu? Kaydol" : "Zaten hesabın var mı? Giriş Yap",
+                _isLogin
+                    ? "Hesabın yok mu? Kaydol"
+                    : "Zaten hesabın var mı? Giriş Yap",
                 style: const TextStyle(color: Colors.orange),
               ),
             ),
