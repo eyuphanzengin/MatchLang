@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 // NO_CONTENT
 
 import 'login_screen.dart';
-import 'home_screen.dart';
-// NO_CONTENT
+import 'main_screen.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -28,9 +27,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   void _navigateToLevel(BuildContext context) {
-    Navigator.push(
+    Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      MaterialPageRoute(builder: (_) => const MainScreen()),
     );
   }
 

@@ -1,10 +1,12 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../models/user_data_provider.dart';
+import '../services/tts_manager.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -19,8 +21,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   final List<Map<String, dynamic>> _messages = [];
   bool _isLoading = false;
-  late final GenerativeModel _model;
-  late final ChatSession _chat;
+
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _isListening = false;
+  final TtsManager _ttsManager = TtsManager();
+  bool _autoTTS = true;
 
   @override
   void initState() {
@@ -29,67 +34,47 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _initChatbot() {
-    // API anahtarını alıyoruz
-    final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
-
-    if (apiKey.isEmpty || apiKey == 'your_api_key_here') {
-      setState(() {
-        _messages.add({
-          'role': 'bot',
-          'text':
-              '⚠️ Sistem Hatası: Lütfen projeye ait .env dosyasındaki GEMINI_API_KEY değişkenini doldurun.',
-        });
-      });
-      return;
-    }
-
-    // Başlangıç promptu için verileri çekip modeli ona göre kuruyoruz
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final userData = context.read<UserDataProvider>();
-
-      final systemPrompt =
-          """
-Sen MatchLang adında bir dil öğrenme uygulamasının samimi, Türk ve İngilizce bilen yabancı dil asistanısın. 
-Karşındakinin seviyesi: ${userData.currentLevel}.
-Öğrendiği kelimeler: [${userData.knownWords.join(", ")}].
-Sık Hata Yaptığı kelimeler: [${_getWorstMistakes(userData)}].
-
-İKİ GÖREVİN VAR:
-1. Kullanıcının attığı mesaja kısa, samimi ve motive edici bir destek ver. 
-2. Mesajın sonuna "İngilizce pratik yapalım mı?" minvalinde, onun hata yaptığı kelimeler üzerinden bir İngilizce cümle kurmasını iste (Örn: Bana 'accident' kullanarak bir cümle kurar mısın?).
-
-Asla uzun şeyler yazma. Çok kısa ve heyecanlı konuş. Emoji kullan.
-""";
-
-      // Modeli gerçek formatı ve sistem komutu (systemInstruction) ile başlatıyoruz
-      _model = GenerativeModel(
-        model: 'gemini-2.0-flash',
-        apiKey: apiKey,
-        systemInstruction: Content.system(systemPrompt),
-      );
-
-      // Sohbeti (Geçmişsiz) ana sistem komutu üzerine başlatıyoruz
-      _chat = _model.startChat();
-
       setState(() {
         _messages.add({
           'role': 'bot',
           'text':
-              'Merhaba! Ben MatchLang asistanın. 🎉\nAklına takılanları sorabilir veya İngilizce pratik yapmak istersen bana yazabilirsin!',
+              'Merhaba! Ben MatchLang yerel Llama 3.2 asistanın. 🎉\nAklına takılanları sorabilir veya İngilizce pratik yapmak istersen bana yazabilirsin!',
         });
       });
     });
   }
 
-  String _getWorstMistakes(UserDataProvider userData) {
+  List<String> _getWorstMistakesList(UserDataProvider userData) {
     // En çok yanlış yapılan kelimeleri çıkaralım
     final sortedStats = userData.wordStats.entries.toList()
       ..sort(
         (a, b) => (b.value['wrong'] ?? 0).compareTo(a.value['wrong'] ?? 0),
       );
 
-    final topMistakes = sortedStats.take(5).map((e) => e.key).toList();
-    return topMistakes.join(', ');
+    return sortedStats.take(5).map((e) => e.key).toList();
+  }
+
+  void _listenForSpeech() async {
+    if (!_isListening) {
+      bool available = await _speech.initialize(
+        onStatus: (val) => debugPrint('onStatus: $val'),
+        onError: (val) => debugPrint('onError: $val'),
+      );
+      if (available) {
+        setState(() => _isListening = true);
+        _speech.listen(
+          onResult: (val) {
+            setState(() {
+              _messageController.text = val.recognizedWords;
+            });
+          },
+        );
+      }
+    } else {
+      setState(() => _isListening = false);
+      _speech.stop();
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -104,17 +89,48 @@ Asla uzun şeyler yazma. Çok kısa ve heyecanlı konuş. Emoji kullan.
     _scrollToBottom();
 
     try {
-      final response = await _chat.sendMessage(Content.text(text));
-      setState(() {
-        _messages.add({'role': 'bot', 'text': response.text ?? '...'});
-        _isLoading = false;
-      });
+      final userData = context.read<UserDataProvider>();
+      final String safeLevel = userData.currentLevel.toString();
+      final List<String> safeKnownWords = userData.knownWords.cast<String>();
+      final List<String> safeMistakes = _getWorstMistakesList(userData);
+
+      // Android Emülatöründen bilgisayardaki localhost'a erişmek için 10.0.2.2 kullanılır.
+      const serverUrl = 'http://10.0.2.2:8000/chat';
+      
+      final response = await http.post(
+        Uri.parse(serverUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'level': safeLevel,
+          'known_words': safeKnownWords,
+          'worst_mistakes': safeMistakes,
+          'message': text,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+          final data = jsonDecode(utf8.decode(response.bodyBytes));
+          final botResponse = data['response'] ?? '...';
+          setState(() {
+            _messages.add({'role': 'bot', 'text': botResponse});
+            _isLoading = false;
+          });
+          
+          if (_autoTTS) {
+             _ttsManager.speak(botResponse);
+          }
+      } else {
+          setState(() {
+            _messages.add({'role': 'bot', 'text': '⚠️ Sunucu Hatası: (${response.statusCode})'});
+            _isLoading = false;
+          });
+      }
       _scrollToBottom();
     } catch (e) {
       setState(() {
         _messages.add({
           'role': 'bot',
-          'text': 'Bir bağlantı hatası oluştu: $e',
+          'text': '⚠️ Llama 3.2 bağlantısı kurulamadı. Lütfen Python FastAPI sunucusunun arkada çalıştığından emin ol.\n\n(Hata: $e)',
         });
         _isLoading = false;
       });
@@ -150,6 +166,23 @@ Asla uzun şeyler yazma. Çok kısa ve heyecanlı konuş. Emoji kullan.
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: Icon(
+              _autoTTS ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+              color: _autoTTS ? Colors.amber : Colors.grey,
+            ),
+            onPressed: () {
+              setState(() {
+                _autoTTS = !_autoTTS;
+              });
+              if (!_autoTTS) {
+                // If turned off, make sure it stops speaking immediately.
+                // Just in case we add stop method, keeping logic simple.
+              }
+            },
+          )
+        ],
         backgroundColor: const Color(0xFF121212),
         elevation: 2,
         centerTitle: true,
@@ -233,8 +266,8 @@ Asla uzun şeyler yazma. Çok kısa ve heyecanlı konuş. Emoji kullan.
               style: const TextStyle(color: Colors.white),
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(
-                hintText: "Asistana bir şey yaz...",
-                hintStyle: const TextStyle(color: Colors.white54),
+                hintText: _isListening ? "Dinaniyor..." : "Asistana bir şey yaz...",
+                hintStyle: TextStyle(color: _isListening ? Colors.amber : Colors.white54),
                 filled: true,
                 fillColor: const Color(0xFF2C2C2C),
                 contentPadding: const EdgeInsets.symmetric(
@@ -250,6 +283,22 @@ Asla uzun şeyler yazma. Çok kısa ve heyecanlı konuş. Emoji kullan.
             ),
           ),
           const SizedBox(width: 10),
+          GestureDetector(
+            onTap: _listenForSpeech,
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _isListening ? Colors.redAccent : const Color(0xFF2C2C2C),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _isListening ? Icons.mic_rounded : Icons.mic_none_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
+          ),
+          const SizedBox(width: 5),
           GestureDetector(
             onTap: _sendMessage,
             child: Container(

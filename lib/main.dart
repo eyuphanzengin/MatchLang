@@ -8,7 +8,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'models/user_data_provider.dart';
 
-// NO_CONTENT
 import 'screens/welcome_screen.dart';
 import 'services/sound_manager.dart';
 import 'services/tts_manager.dart';
@@ -21,8 +20,10 @@ void main() async {
   await dotenv.load(fileName: ".env");
   await Firebase.initializeApp();
 
-  // Tam ekran modu
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
   runApp(const MyApp());
 }

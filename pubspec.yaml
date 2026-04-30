@@ -42,6 +42,7 @@ dependencies:
   string_similarity: ^2.1.1
   google_generative_ai: ^0.4.7
   flutter_dotenv: ^6.0.0
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:

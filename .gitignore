@@ -43,3 +43,17 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Python & Backend related
+backend/venv/
+backend/chroma_data/
+__pycache__/
+*.pyc
+
+# Environment & Secrets
+.env
+*.env
+
+# Large Files & Crash Reports
+*.zip
+bugreport*.zip

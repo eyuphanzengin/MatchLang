@@ -1,41 +1,19 @@
-import 'package:flutter_tts/flutter_tts.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class TtsManager {
-  final FlutterTts _flutterTts = FlutterTts();
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
-  TtsManager() {
-    _initTts();
-  }
-
-  Future<void> _initTts() async {
-    // Dil ayarını İngilizce yapıyoruz (Amerikan aksanı)
-    await _flutterTts.setLanguage("en-US");
-
-    // Konuşma hızı (0.0 ile 1.0 arası). 0.5 eğitim için idealdir, net anlaşılır.
-    await _flutterTts.setSpeechRate(0.5);
-
-    // Ses tonu (1.0 normal insan sesi)
-    await _flutterTts.setPitch(1.0);
-
-    // iOS için sesin sessiz modda bile çıkmasını sağlar
-    await _flutterTts.setIosAudioCategory(
-        IosTextToSpeechAudioCategory.playback,
-        [
-          IosTextToSpeechAudioCategoryOptions.defaultToSpeaker,
-          IosTextToSpeechAudioCategoryOptions.allowBluetooth,
-          IosTextToSpeechAudioCategoryOptions.allowBluetoothA2DP,
-          IosTextToSpeechAudioCategoryOptions.mixWithOthers
-        ],
-        IosTextToSpeechAudioMode.voicePrompt
-    );
-  }
+  TtsManager();
 
   Future<void> speak(String text) async {
-    // Eğer önceki bir konuşma varsa durdur (üst üste binmesin)
-    await _flutterTts.stop();
-
-    if (text.isNotEmpty) {
-      await _flutterTts.speak(text);
+    try {
+      await _audioPlayer.stop();
+      if (text.isNotEmpty) {
+        String url = 'http://10.0.2.2:8000/tts?text=${Uri.encodeComponent(text)}';
+        await _audioPlayer.play(UrlSource(url));
+      }
+    } catch (e) {
+      print("Cloud TTS Speak Error: $e");
     }
   }
 }

@@ -488,6 +488,7 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
           data: questionData,
           ttsManager: _ttsManager, // PASS
           onComplete: () => _handleAnswer(true),
+          onMatch: () => _soundManager.playSuccessSound(), // Her eşleşmede ses
           onWrong: (word) => _handleAnswer(false, mistakeWord: word),
         );
       case 'speaking':
@@ -518,6 +519,7 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
 class MatchingQuestionWidget extends StatefulWidget {
   final Map<String, dynamic> data;
   final VoidCallback onComplete;
+  final VoidCallback onMatch; // TEKİL DOĞRU EŞLEŞME İÇİN
   final Function(String?) onWrong;
   final TtsManager ttsManager; // EKLENDİ
 
@@ -525,6 +527,7 @@ class MatchingQuestionWidget extends StatefulWidget {
     super.key,
     required this.data,
     required this.onComplete,
+    required this.onMatch,
     required this.onWrong,
     required this.ttsManager,
   });
@@ -562,6 +565,7 @@ class _MatchingQuestionWidgetState extends State<MatchingQuestionWidget> {
 
     if (selLeft != null && selRight != null) {
       if (pairs.any((p) => p['en'] == selLeft && p['tr'] == selRight)) {
+        widget.onMatch(); // Doğru eşleşme anında efekti patlat!
         setState(() {
           matched.add(selLeft!);
           matched.add(selRight!);
