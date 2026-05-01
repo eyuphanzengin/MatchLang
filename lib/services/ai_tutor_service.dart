@@ -1,39 +1,13 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:http/http.dart' as http;
 import '../models/content_bank.dart';
 
 class AITutorService with ChangeNotifier {
-  GenerativeModel? _model;
-  // USER API KEY entegre edildi
-  String? _apiKey = "AIzaSyBvVD6LHiMBp5RMBBCjRHnBQ3_pzrCjyfA";
-
-  AITutorService() {
-    _initModel();
-  }
-
-  void _initModel() {
-    if (_apiKey != null && _apiKey!.isNotEmpty) {
-      try {
-        _model = GenerativeModel(model: 'gemini-2.0-flash', apiKey: _apiKey!);
-        debugPrint("Gemini AI Modeli Başlatıldı (gemini-2.0-flash).");
-      } catch (e) {
-        debugPrint("AI Model başlatma hatası: $e");
-      }
-    }
-  }
-
-  // --- API ANAHTARI AYARLAYICI ---
-  void setApiKey(String key) {
-    if (key.isNotEmpty) {
-      _apiKey = key;
-      _initModel();
-      notifyListeners();
-    }
-  }
-
-  bool get isAiActive => _apiKey != null && _model != null;
+  
+  // Artık yerel Llama 3.2 kullanıldığı için her zaman aktif varsayıyoruz.
+  bool get isAiActive => true; 
 
   // --- QUIZ OLUŞTURMA ---
   Future<List<Map<String, dynamic>>> generateQuiz({
@@ -49,85 +23,43 @@ class AITutorService with ChangeNotifier {
       lvl = int.tryParse(levelKey) ?? 1;
     }
 
-    // 1. EĞER GEMINI AKTİFSE ORADAN ÇEK
-    if (isAiActive) {
-      try {
-        return await _generateWithGemini(lvl, topic);
-      } catch (e) {
-        debugPrint("Gemini hatası, yedek kullanılıyor: $e");
-      }
+    // 1. LLAMA 3.2 SUNUCUSUNDAN ÇEK
+    try {
+      return await _generateWithLocalLlama(lvl, topic);
+    } catch (e) {
+      debugPrint("Llama hatası, yedek (Procedural) banka kullanılıyor: $e");
     }
 
-    // 2. AKSİ HALDE ZENGİN LOKAL VERİYİ KULLAN
+    // 2. AKSİ HALDE ZENGİN LOKAL VERİYİ KULLAN (Çevrimdışı/Yedek)
     await Future.delayed(
       const Duration(milliseconds: 600),
     ); // Simüle edilmiş yükleme
     return _generateProceduralQuiz(lvl);
   }
 
-  // --- GEMINI MANTIĞI ---
-  Future<List<Map<String, dynamic>>> _generateWithGemini(
+  // --- LLAMA (LOCAL AI) MANTIĞI ---
+  Future<List<Map<String, dynamic>>> _generateWithLocalLlama(
     int level,
     String topic,
   ) async {
-    if (_model == null) throw Exception("AI Model not initialized");
+    const serverUrl = 'http://10.0.2.2:8000/generate_quiz';
+    
+    final response = await http.post(
+      Uri.parse(serverUrl),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'level': level,
+        'topic': topic,
+      }),
+    );
 
-    // Zorluk (CEFR) hesapla
-    String cefr = 'A1';
-    if (level >= 76) {
-      cefr = 'B2';
-    } else if (level >= 51) {
-      cefr = 'B1';
-    } else if (level >= 26) {
-      cefr = 'A2';
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      // Gelen veri doğrudan JSON dizisidir (List<Map<String,dynamic>>)
+      return List<Map<String, dynamic>>.from(decoded);
+    } else {
+      throw Exception("Llama Sunucu Hatası: ${response.statusCode}");
     }
-    final prompt =
-        """
-      Generate a language learning quiz for level $level / 100 (CEFR Level: $cefr).
-      Topic: $topic.
-      
-      Return ONLY valid JSON.
-      Format:
-      [
-        {
-          "type": "match",
-          "question": "Eşleştirme",
-          "pairs": [{"en": "Word", "tr": "Kelime"}] (5 pairs)
-        },
-        {
-          "type": "audio_assembly",
-          "question": "Duyduğunu Kur",
-          "target": "English sentence",
-          "distractors": ["wrong", "words"]
-        },
-        {
-          "type": "translate_sentence",
-          "question": "Bu cümleyi çevir",
-          "source": "English sentence to translate",
-          "target": "Beklenen Türkçe Cümle",
-          "options": ["doğru", "kelime", "yanlış", "kelimeler"] (Mixed options for user to build turkish sentence)
-        },
-        {
-          "type": "choice",
-          "question": "Soru metni",
-          "options": ["A", "B", "C", "D"],
-          "answer": "Correct Option"
-        }
-      ]
-      Provide exactly 10 diverse questions (mix all types) appropriate for CEFR $cefr.
-    """;
-
-    final content = [Content.text(prompt)];
-    final response = await _model!.generateContent(content);
-
-    String? jsonStr = response.text;
-    if (jsonStr == null) throw Exception("Empty AI response");
-
-    // Markdown temizliği
-    jsonStr = jsonStr.replaceAll('```json', '').replaceAll('```', '').trim();
-
-    final List<dynamic> decoded = jsonDecode(jsonStr);
-    return List<Map<String, dynamic>>.from(decoded);
   }
 
   // --- YEREL YEDEK MANTIĞI ---
@@ -225,16 +157,25 @@ class AITutorService with ChangeNotifier {
     String? correctAnswer,
     String? contextType,
   }) async {
-    // Eğer AI aktifse ona sorabiliriz
-    if (isAiActive && _model != null) {
-      try {
-        final prompt =
-            "Explain simply in Turkish why '$userAnswer' is wrong for target '$correctAnswer'. Context: $contextType (English learning). Keep it short.";
-        final response = await _model!.generateContent([Content.text(prompt)]);
-        if (response.text != null) return response.text!;
-      } catch (e) {
-        // Hata olursa lokale düş
+    // AI aktif, Llama'ya sor
+    try {
+      const serverUrl = 'http://10.0.2.2:8000/explain';
+      final response = await http.post(
+        Uri.parse(serverUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'user_answer': userAnswer ?? '',
+          'correct_answer': correctAnswer ?? '',
+          'context_type': contextType ?? '',
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        return data['response'] ?? "Cevap anlaşılamadı.";
       }
+    } catch (e) {
+      debugPrint("Llama explain hatası: $e");
     }
 
     // Yedek

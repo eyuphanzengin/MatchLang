@@ -234,11 +234,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 left: 0,
                 right: 0,
                 child: ClipRRect(
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                    child: Container(
-                      height: topSectionHeight,
-                      color: Colors.black.withValues(alpha: 0.2),
+                  child: Container(
+                    height: topSectionHeight,
+                    color: Colors.black.withValues(alpha: 0.8),
                       alignment: Alignment.bottomCenter,
                       padding: const EdgeInsets.only(
                         bottom: 20,
@@ -249,7 +247,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         child: buildTopButtonsRow(user, context, userData),
                       ),
                     ),
-                  ),
                 ),
               ),
             ],
@@ -541,8 +538,7 @@ class NeonPathPainter extends CustomPainter {
       final glowPaint = Paint()
         ..color = color.withValues(alpha: 0.5)
         ..strokeWidth = 12
-        ..style = PaintingStyle.stroke
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+        ..style = PaintingStyle.stroke;
       canvas.drawPath(path, glowPaint);
     }
     canvas.drawPath(path, paint);

@@ -25,7 +25,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final stt.SpeechToText _speech = stt.SpeechToText();
   bool _isListening = false;
   final TtsManager _ttsManager = TtsManager();
-  bool _autoTTS = true;
+  bool _autoTTS = false;
 
   @override
   void initState() {
@@ -96,7 +96,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // Android Emülatöründen bilgisayardaki localhost'a erişmek için 10.0.2.2 kullanılır.
       const serverUrl = 'http://10.0.2.2:8000/chat';
-      
+      // Son 6 mesajı geçmiş olarak gönderelim (Sistem mesajı hariç)
+      final history = _messages
+          .where((m) => m['role'] != 'system' && m['text'] != null)
+          .skip(_messages.length > 6 ? _messages.length - 6 : 0)
+          .toList();
+
       final response = await http.post(
         Uri.parse(serverUrl),
         headers: {'Content-Type': 'application/json'},
@@ -105,6 +110,7 @@ class _ChatScreenState extends State<ChatScreen> {
           'known_words': safeKnownWords,
           'worst_mistakes': safeMistakes,
           'message': text,
+          'history': history,
         }),
       );
 

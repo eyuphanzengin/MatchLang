@@ -12,6 +12,7 @@ import 'screens/welcome_screen.dart';
 import 'services/sound_manager.dart';
 import 'services/tts_manager.dart';
 import 'services/ai_tutor_service.dart';
+import 'services/service_manager.dart';
 
 import 'screens/main_screen.dart';
 
@@ -24,6 +25,8 @@ void main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
+
+  await ServiceManager().init();
 
   runApp(const MyApp());
 }

@@ -33,7 +33,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _selectedIndex, children: _pages),
+      body: _pages[_selectedIndex],
       bottomNavigationBar: Theme(
         data: Theme.of(context).copyWith(canvasColor: const Color(0xFF1F1F1F)),
         child: BottomNavigationBar(
