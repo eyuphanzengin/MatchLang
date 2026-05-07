@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class UserDataProvider with ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -73,6 +75,72 @@ class UserDataProvider with ChangeNotifier {
     await _loadUserData();
   }
 
+  // ============================================================
+  // YEREL YEDEKLEME: SharedPreferences ile kritik verileri kaydet
+  // Firebase baglantisi kesildiginde uygulama yerel yedekten
+  // devam edebilsin diye bu sistem eklendi.
+  // ============================================================
+  Future<void> _saveToLocalCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_userName', userName);
+      await prefs.setInt('cached_currentLevel', currentLevel);
+      await prefs.setInt('cached_hearts', hearts);
+      await prefs.setInt('cached_stars', stars);
+      await prefs.setInt('cached_totalScore', totalScore);
+      await prefs.setString('cached_avatarPath', avatarPath ?? 'assets/avatars/avatar1.png');
+      await prefs.setInt('cached_streakCount', streakCount);
+      await prefs.setStringList('cached_knownWords', knownWords);
+      await prefs.setInt('cached_todaysCorrect', todaysCorrectAnswers);
+      await prefs.setInt('cached_todaysIncorrect', todaysIncorrectAnswers);
+      await prefs.setBool('cached_isSoundOn', isSoundOn);
+      await prefs.setBool('cached_isVibrationOn', isVibrationOn);
+      if (lastHeartTime != null) {
+        await prefs.setString('cached_lastHeartTime', lastHeartTime!.toIso8601String());
+      }
+      if (lastLoginDate != null) {
+        await prefs.setString('cached_lastLoginDate', lastLoginDate!.toIso8601String());
+      }
+      await prefs.setString('cached_wordStats', jsonEncode(wordStats));
+      debugPrint("[LocalCache] Veriler yerele kaydedildi.");
+    } catch (e) {
+      debugPrint("[LocalCache] Kaydetme hatasi: $e");
+    }
+  }
+
+  Future<void> _loadFromLocalCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      userName = prefs.getString('cached_userName') ?? "Misafir";
+      currentLevel = prefs.getInt('cached_currentLevel') ?? 1;
+      hearts = prefs.getInt('cached_hearts') ?? 5;
+      stars = prefs.getInt('cached_stars') ?? 0;
+      totalScore = prefs.getInt('cached_totalScore') ?? 0;
+      avatarPath = prefs.getString('cached_avatarPath') ?? 'assets/avatars/avatar1.png';
+      streakCount = prefs.getInt('cached_streakCount') ?? 0;
+      knownWords = prefs.getStringList('cached_knownWords') ?? [];
+      todaysCorrectAnswers = prefs.getInt('cached_todaysCorrect') ?? 0;
+      todaysIncorrectAnswers = prefs.getInt('cached_todaysIncorrect') ?? 0;
+      isSoundOn = prefs.getBool('cached_isSoundOn') ?? true;
+      isVibrationOn = prefs.getBool('cached_isVibrationOn') ?? true;
+      final heartStr = prefs.getString('cached_lastHeartTime');
+      if (heartStr != null) lastHeartTime = DateTime.tryParse(heartStr);
+      final loginStr = prefs.getString('cached_lastLoginDate');
+      if (loginStr != null) lastLoginDate = DateTime.tryParse(loginStr);
+      final statsStr = prefs.getString('cached_wordStats');
+      if (statsStr != null) {
+        final decoded = jsonDecode(statsStr) as Map<String, dynamic>;
+        wordStats = decoded.map((key, value) => MapEntry(
+          key,
+          Map<String, int>.from(value as Map),
+        ));
+      }
+      debugPrint("[LocalCache] Veriler yerel yedekten yuklendi.");
+    } catch (e) {
+      debugPrint("[LocalCache] Yukleme hatasi: $e");
+    }
+  }
+
   Future<void> _loadUserData() async {
     if (userId == null) return;
     try {
@@ -101,12 +169,18 @@ class UserDataProvider with ChangeNotifier {
         }
 
         _checkAndUpdateStreak();
+        
+        // Firebase'den basariyla yuklendikten sonra yerel yedek al
+        await _saveToLocalCache();
       } else {
         await _initNewUser();
       }
       notifyListeners();
     } catch (e) {
-      debugPrint("Error loading user data: $e");
+      debugPrint("Firebase yukleme hatasi, yerel yedek deneniyor: $e");
+      // Firebase baglantisi yoksa yerel yedekten yukle
+      await _loadFromLocalCache();
+      notifyListeners();
     }
   }
 

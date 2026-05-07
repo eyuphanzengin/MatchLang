@@ -42,7 +42,7 @@ class AITutorService with ChangeNotifier {
     int level,
     String topic,
   ) async {
-    const serverUrl = 'http://10.0.2.2:8000/generate_quiz';
+    const serverUrl = 'http://127.0.0.1:8000/generate_quiz';
     
     final response = await http.post(
       Uri.parse(serverUrl),
@@ -159,7 +159,7 @@ class AITutorService with ChangeNotifier {
   }) async {
     // AI aktif, Llama'ya sor
     try {
-      const serverUrl = 'http://10.0.2.2:8000/explain';
+      const serverUrl = 'http://127.0.0.1:8000/explain';
       final response = await http.post(
         Uri.parse(serverUrl),
         headers: {'Content-Type': 'application/json'},

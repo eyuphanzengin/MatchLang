@@ -39,7 +39,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _messages.add({
           'role': 'bot',
           'text':
-              'Merhaba! Ben MatchLang yerel Llama 3.2 asistanın. 🎉\nAklına takılanları sorabilir veya İngilizce pratik yapmak istersen bana yazabilirsin!',
+              'Merhaba! Ben MatchLang, senin kisisel Ingilizce ogretmeninim. Aklina takilanlari sorabilir veya Ingilizce pratik yapmak istersen bana yazabilirsin!',
         });
       });
     });
@@ -95,7 +95,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final List<String> safeMistakes = _getWorstMistakesList(userData);
 
       // Android Emülatöründen bilgisayardaki localhost'a erişmek için 10.0.2.2 kullanılır.
-      const serverUrl = 'http://10.0.2.2:8000/chat';
+      const serverUrl = 'http://127.0.0.1:8000/chat';
       // Son 6 mesajı geçmiş olarak gönderelim (Sistem mesajı hariç)
       final history = _messages
           .where((m) => m['role'] != 'system' && m['text'] != null)
@@ -136,7 +136,7 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _messages.add({
           'role': 'bot',
-          'text': '⚠️ Llama 3.2 bağlantısı kurulamadı. Lütfen Python FastAPI sunucusunun arkada çalıştığından emin ol.\n\n(Hata: $e)',
+          'text': 'Baglanti kurulamadi. Lutfen Python FastAPI sunucusunun arkada calistigindan emin ol.\n\n(Hata: $e)',
         });
         _isLoading = false;
       });
@@ -158,17 +158,24 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final sw = MediaQuery.of(context).size.width;
     return Scaffold(
       backgroundColor: const Color(0xFF1F1F1F),
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.smart_toy_rounded, color: Colors.amber),
-            const SizedBox(width: 10),
-            Text(
-              "Yapay Zeka Asistanı",
-              style: GoogleFonts.rubik(fontWeight: FontWeight.bold),
+            Icon(Icons.smart_toy_rounded, color: Colors.amber, size: sw * 0.06),
+            SizedBox(width: sw * 0.02),
+            Flexible(
+              child: Text(
+                "Yapay Zeka Asistanı",
+                style: GoogleFonts.rubik(
+                  fontWeight: FontWeight.bold,
+                  fontSize: sw * 0.045,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -177,15 +184,12 @@ class _ChatScreenState extends State<ChatScreen> {
             icon: Icon(
               _autoTTS ? Icons.volume_up_rounded : Icons.volume_off_rounded,
               color: _autoTTS ? Colors.amber : Colors.grey,
+              size: sw * 0.06,
             ),
             onPressed: () {
               setState(() {
                 _autoTTS = !_autoTTS;
               });
-              if (!_autoTTS) {
-                // If turned off, make sure it stops speaking immediately.
-                // Just in case we add stop method, keeping logic simple.
-              }
             },
           )
         ],
@@ -198,20 +202,20 @@ class _ChatScreenState extends State<ChatScreen> {
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
-              padding: const EdgeInsets.all(15),
+              padding: EdgeInsets.all(sw * 0.035),
               itemCount: _messages.length,
               itemBuilder: (context, index) {
                 final msg = _messages[index];
                 final isUser = msg['role'] == 'user';
-                return _buildChatBubble(msg['text'], isUser);
+                return _buildChatBubble(msg['text'], isUser, showTts: !isUser);
               },
             ),
           ),
 
           if (_isLoading)
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: CircularProgressIndicator(color: Colors.amber),
+            Padding(
+              padding: EdgeInsets.all(sw * 0.02),
+              child: CircularProgressIndicator(color: Colors.amber, strokeWidth: sw * 0.008),
             ),
 
           _buildMessageInput(),
@@ -220,65 +224,87 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildChatBubble(String text, bool isUser) {
+  Widget _buildChatBubble(String text, bool isUser, {bool showTts = false}) {
+    final sw = MediaQuery.of(context).size.width;
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 5),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        decoration: BoxDecoration(
-          color: isUser ? Colors.orange.shade600 : Colors.blueGrey.shade800,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(20),
-            topRight: const Radius.circular(20),
-            bottomLeft: Radius.circular(isUser ? 20 : 0),
-            bottomRight: Radius.circular(isUser ? 0 : 20),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black26,
-              blurRadius: 4,
-              offset: const Offset(2, 2),
+      child: Column(
+        crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Container(
+            margin: EdgeInsets.symmetric(vertical: sw * 0.012),
+            padding: EdgeInsets.symmetric(horizontal: sw * 0.04, vertical: sw * 0.028),
+            constraints: BoxConstraints(
+              maxWidth: sw * 0.75,
             ),
-          ],
-        ),
-        child: Text(
-          text,
-          style: GoogleFonts.rubik(
-            color: Colors.white,
-            fontSize: 15,
-            height: 1.3,
+            decoration: BoxDecoration(
+              color: isUser ? Colors.orange.shade600 : Colors.blueGrey.shade800,
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(20),
+                topRight: const Radius.circular(20),
+                bottomLeft: Radius.circular(isUser ? 20 : 0),
+                bottomRight: Radius.circular(isUser ? 0 : 20),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 4,
+                  offset: const Offset(2, 2),
+                ),
+              ],
+            ),
+            child: Text(
+              text,
+              style: GoogleFonts.rubik(
+                color: Colors.white,
+                fontSize: sw * 0.037,
+                height: 1.3,
+              ),
+            ),
           ),
-        ),
+          if (showTts)
+            Padding(
+              padding: EdgeInsets.only(left: sw * 0.02, bottom: sw * 0.01),
+              child: GestureDetector(
+                onTap: () => _ttsManager.speak(text),
+                child: Icon(
+                  Icons.volume_up_rounded,
+                  color: Colors.white54,
+                  size: sw * 0.05,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
 
   Widget _buildMessageInput() {
+    final sw = MediaQuery.of(context).size.width;
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 15,
-        vertical: 10,
-      ).copyWith(bottom: MediaQuery.of(context).padding.bottom + 10),
+      padding: EdgeInsets.symmetric(
+        horizontal: sw * 0.035,
+        vertical: sw * 0.025,
+      ).copyWith(bottom: MediaQuery.of(context).padding.bottom + sw * 0.025),
       decoration: const BoxDecoration(color: Color(0xFF121212)),
       child: Row(
         children: [
           Expanded(
             child: TextField(
               controller: _messageController,
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: Colors.white, fontSize: sw * 0.037),
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(
-                hintText: _isListening ? "Dinaniyor..." : "Asistana bir şey yaz...",
-                hintStyle: TextStyle(color: _isListening ? Colors.amber : Colors.white54),
+                hintText: _isListening ? "Dinleniyor..." : "Asistana bir şey yaz...",
+                hintStyle: TextStyle(
+                  color: _isListening ? Colors.amber : Colors.white54,
+                  fontSize: sw * 0.035,
+                ),
                 filled: true,
                 fillColor: const Color(0xFF2C2C2C),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 14,
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: sw * 0.045,
+                  vertical: sw * 0.032,
                 ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(30),
@@ -288,11 +314,11 @@ class _ChatScreenState extends State<ChatScreen> {
               onSubmitted: (_) => _sendMessage(),
             ),
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: sw * 0.02),
           GestureDetector(
             onTap: _listenForSpeech,
             child: Container(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.all(sw * 0.028),
               decoration: BoxDecoration(
                 color: _isListening ? Colors.redAccent : const Color(0xFF2C2C2C),
                 shape: BoxShape.circle,
@@ -300,20 +326,20 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Icon(
                 _isListening ? Icons.mic_rounded : Icons.mic_none_rounded,
                 color: Colors.white,
-                size: 24,
+                size: sw * 0.055,
               ),
             ),
           ),
-          const SizedBox(width: 5),
+          SizedBox(width: sw * 0.012),
           GestureDetector(
             onTap: _sendMessage,
             child: Container(
-              padding: const EdgeInsets.all(14),
+              padding: EdgeInsets.all(sw * 0.032),
               decoration: const BoxDecoration(
                 color: Colors.amber,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.send_rounded, color: Colors.black87),
+              child: Icon(Icons.send_rounded, color: Colors.black87, size: sw * 0.055),
             ),
           ),
         ],

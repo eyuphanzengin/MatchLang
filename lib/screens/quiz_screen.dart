@@ -58,15 +58,94 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
 
   Future<void> _loadQuiz() async {
     final aiService = context.read<AITutorService>();
-    final questions = await aiService.generateQuiz(
+    final rawQuestions = await aiService.generateQuiz(
       level: widget.level,
       exactLevel: widget.levelIndex,
       topic: 'General',
     );
 
+    // ============================================================
+    // SORU DOGRULAMA: AI'dan gelen her soruyu kontrol et.
+    // Eksik veya null alan varsa, soruyu reddet veya tamamla.
+    // Bu sayede "type 'NULL' is not a subtype" hatasi onlenir.
+    // ============================================================
+    final validQuestions = <Map<String, dynamic>>[];
+    for (final q in rawQuestions) {
+      final type = q['type']?.toString();
+      if (type == null) continue; // Tipi olmayan soru gecersiz
+
+      bool isValid = false;
+      switch (type) {
+        case 'choice':
+          // question, answer, options zorunlu
+          if (q['question'] != null && q['answer'] != null && q['options'] is List && (q['options'] as List).length >= 2) {
+            // options icerisindeki null'lari temizle
+            q['options'] = (q['options'] as List).where((o) => o != null).map((o) => o.toString()).toList();
+            q['question'] = q['question'].toString();
+            q['answer'] = q['answer'].toString();
+            // answer seceneklerde olmayabilir, ekle
+            if (!(q['options'] as List).contains(q['answer'])) {
+              (q['options'] as List).add(q['answer']);
+            }
+            isValid = (q['options'] as List).length >= 2;
+          }
+          break;
+        case 'match':
+          // pairs zorunlu, her pair'de en ve tr olmali
+          if (q['pairs'] is List && (q['pairs'] as List).isNotEmpty) {
+            final cleanPairs = <Map<String, dynamic>>[];
+            for (final p in (q['pairs'] as List)) {
+              if (p is Map && p['en'] != null && p['tr'] != null) {
+                cleanPairs.add({'en': p['en'].toString(), 'tr': p['tr'].toString()});
+              }
+            }
+            if (cleanPairs.length >= 2) {
+              q['pairs'] = cleanPairs;
+              isValid = true;
+            }
+          }
+          break;
+        case 'translate_sentence':
+          // sentence zorunlu
+          if (q['sentence'] != null && q['sentence'].toString().trim().isNotEmpty) {
+            q['sentence'] = q['sentence'].toString();
+            q['answer'] = q['answer']?.toString() ?? q['sentence'];
+            isValid = true;
+          }
+          break;
+        case 'audio_assembly':
+          // target zorunlu
+          if (q['target'] != null && q['target'].toString().trim().isNotEmpty) {
+            q['target'] = q['target'].toString();
+            if (q['distractors'] is List) {
+              q['distractors'] = (q['distractors'] as List).where((d) => d != null).map((d) => d.toString()).toList();
+            } else {
+              q['distractors'] = <String>[];
+            }
+            isValid = true;
+          }
+          break;
+        case 'speaking':
+          if (q['sentence'] != null || q['target'] != null) {
+            q['sentence'] = (q['sentence'] ?? q['target']).toString();
+            isValid = true;
+          }
+          break;
+        default:
+          // Bilinmeyen soru tipi, atla
+          break;
+      }
+
+      if (isValid) {
+        validQuestions.add(q);
+      } else {
+        debugPrint("[QuizFilter] Gecersiz soru atildi: $q");
+      }
+    }
+
     if (mounted) {
       setState(() {
-        _questions = questions;
+        _questions = validQuestions;
         _isLoading = false;
         _startTime = DateTime.now();
       });
@@ -760,7 +839,9 @@ class _ListeningAssemblyWidgetState extends State<ListeningAssemblyWidget> {
   }
 
   void _playAudio({double rate = 0.5}) async {
-    widget.ttsManager.speak(widget.data['target'] ?? "");
+    // Eger rate cok dusukse yavas okumayi aktif et (slow motion tusu)
+    bool isSlow = rate < 0.3;
+    widget.ttsManager.speak(widget.data['target'] ?? "", slow: isSlow);
   }
 
   void _checkAnswer() {
@@ -1190,7 +1271,37 @@ class _TranslateState extends State<TranslateQuestionWidget> {
   }
 
   void _initData() {
-    List<String> opts = List<String>.from(widget.data['options'] ?? []);
+    // AI tarafindan uretilen 'options' alanina guvenmeyip her zaman kendi
+    // seceneklerimizi dogru cevaptan (answer) turetmeliyiz.
+    List<String> opts;
+    
+    // CEVABI (Turkce) kelimelere bol
+    // Kullanici Turkce cumleyi olusturacak
+    String answer = (widget.data['answer'] ?? widget.data['target'] ?? '').toString();
+    
+    // Noktalama isaretlerini temizleyip kelimelere bolelim
+    String cleanAnswer = answer.replaceAll(RegExp(r'[^\w\sğüşıöçĞÜŞİÖÇ]'), '');
+    opts = cleanAnswer.split(' ').where((w) => w.trim().isNotEmpty).toList();
+    
+    // Kullanicinin istegi uzerine ilk kelimenin bas harfi buyuk,
+    // digerlerinin kucuk olsun (kullaniciya ipucu olur)
+    if (opts.isNotEmpty) {
+      String firstWord = opts[0];
+      if (firstWord.isNotEmpty) {
+        opts[0] = firstWord[0].toUpperCase() + firstWord.substring(1).toLowerCase();
+      }
+      for (int i = 1; i < opts.length; i++) {
+        opts[i] = opts[i].toLowerCase();
+      }
+    }
+    
+    // Turkce distractor kelimeler ekle
+    final distractors = ['olan', 'gibi', 'için', 'daha', 'sonra', 'kadar', 'bile', 'hep', 'ancak', 'belki'];
+    distractors.shuffle();
+    // Cevaptaki kelime sayisina gore 2-3 distractor ekle
+    int extraCount = opts.length <= 3 ? 3 : 2;
+    opts.addAll(distractors.take(extraCount));
+    
     opts.shuffle();
     if (mounted) {
       setState(() {
@@ -1204,7 +1315,10 @@ class _TranslateState extends State<TranslateQuestionWidget> {
   }
 
   void _playAudio() {
-    widget.ttsManager.speak(widget.data['source'] ?? "");
+    String text = (widget.data['sentence'] ?? widget.data['source'] ?? '').toString();
+    if (text.isNotEmpty) {
+      widget.ttsManager.speak(text);
+    }
   }
 
   void _checkAnswer() {
@@ -1220,22 +1334,21 @@ class _TranslateState extends State<TranslateQuestionWidget> {
       return;
     }
 
+    // Kullanicinin sectigi kelimeleri al, kucuk harfe cevir ve birlestir
     String userSentence = _userSelection
-        .map((e) => e.word)
+        .map((e) => e.word.toLowerCase())
         .join(" ")
-        .toLowerCase()
-        .replaceAll(RegExp(r'\s+'), ' ') // Normalize multiple spaces
         .trim();
 
-    String target = (widget.data['target'] ?? "")
-        .toString()
-        .toLowerCase()
-        .replaceAll(RegExp(r'\s+'), ' ') // Normalize multiple spaces
+    // Hedef cevabi ayni sekilde temizle, kelimelere bol, kucuk harfe cevir ve birlestir
+    String answer = (widget.data['answer'] ?? widget.data['target'] ?? "").toString();
+    String cleanAnswer = answer.replaceAll(RegExp(r'[^\w\sğüşıöçĞÜŞİÖÇ]'), '');
+    String target = cleanAnswer
+        .split(' ')
+        .where((w) => w.trim().isNotEmpty)
+        .map((w) => w.toLowerCase())
+        .join(" ")
         .trim();
-
-    // Remove punctuation for comparison, but keep spaces
-    userSentence = userSentence.replaceAll(RegExp(r'[^\w\sğüşıöçĞÜŞİÖÇ]'), '');
-    target = target.replaceAll(RegExp(r'[^\w\sğüşıöçĞÜŞİÖÇ]'), '');
 
     bool correct = userSentence == target;
 
@@ -1301,7 +1414,7 @@ class _TranslateState extends State<TranslateQuestionWidget> {
                       ),
                       Expanded(
                         child: Text(
-                          widget.data['source'] ?? "",
+                          (widget.data['sentence'] ?? widget.data['source'] ?? '').toString(),
                           style: const TextStyle(
                             fontSize: 18,
                             color: Colors.black87,

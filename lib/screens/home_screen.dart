@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
@@ -83,8 +82,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final screenWidth = MediaQuery.of(context).size.width;
-    final double topSectionHeight = 100.0;
-    final double itemSpacing = 160.0;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final double topSectionHeight = screenHeight * 0.12;
+    final double itemSpacing = screenHeight * 0.18;
 
     return Consumer<UserDataProvider>(
       builder: (context, userData, child) {
@@ -124,108 +124,114 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
               Positioned.fill(
                 top: 0,
-                child: ListView.builder(
+                child: CustomScrollView(
                   controller: _scrollController,
-                  padding: const EdgeInsets.only(bottom: 200, top: 150),
-                  itemCount: 100,
-                  itemBuilder: (context, index) {
-                    final level = index + 1;
-                    final isPlayable = level <= userData.currentLevel;
-                    final isBossLevel = level % 10 == 0;
-                    final isCompleted = level < userData.currentLevel;
-                    final isActive = level == userData.currentLevel;
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.only(bottom: 200, top: 150),
+                      sliver: SliverList.builder(
+                        itemCount: 100,
+                        itemBuilder: (context, index) {
+                          final level = index + 1;
+                          final isPlayable = level <= userData.currentLevel;
+                          final isBossLevel = level % 10 == 0;
+                          final isCompleted = level < userData.currentLevel;
+                          final isActive = level == userData.currentLevel;
 
-                    final double xOffset =
-                        sin(index / 1.8) * (screenWidth * 0.22);
-                    double? prevXOffset;
-                    if (index < 99) {
-                      prevXOffset =
-                          sin((index + 1) / 1.8) * (screenWidth * 0.22);
-                    }
+                          final double xOffset =
+                              sin(index / 1.8) * (screenWidth * 0.22);
+                          double? prevXOffset;
+                          if (index < 99) {
+                            prevXOffset =
+                                sin((index + 1) / 1.8) * (screenWidth * 0.22);
+                          }
 
-                    return SizedBox(
-                      height: itemSpacing,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        alignment: Alignment.center,
-                        children: [
-                          if (prevXOffset != null)
-                            CustomPaint(
-                              size: Size(screenWidth, itemSpacing),
-                              painter: NeonPathPainter(
-                                startX: xOffset,
-                                endX: prevXOffset,
-                                isPassed: isCompleted,
-                                color: isCompleted
-                                    ? Colors.cyanAccent
-                                    : Colors.grey.withValues(alpha: 0.3),
-                              ),
-                            ),
-                          Transform.translate(
-                            offset: Offset(xOffset, 0),
-                            child: GestureDetector(
-                              onTap: isPlayable
-                                  ? () {
-                                      if (userData.hearts <= 0) {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text(
-                                              'Enerjiniz bitti. Dinlenme vakti!',
-                                            ),
-                                          ),
-                                        );
-                                        return;
-                                      }
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => QuizScreen(
-                                            level: "A${(level / 10).ceil()}",
-                                            levelIndex: level,
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  : null,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                clipBehavior: Clip.none,
-                                children: [
-                                  HexagonLevelNode(
-                                    level: level,
-                                    isActive: isActive,
-                                    isLocked: !isPlayable,
-                                    isBoss: isBossLevel,
-                                    isCompleted: isCompleted,
-                                  ),
-                                  if (isActive)
-                                    AnimatedBuilder(
-                                      animation: _floatingController,
-                                      builder: (context, child) {
-                                        return Positioned(
-                                          top:
-                                              -85 +
-                                              (sin(
-                                                    _floatingController.value *
-                                                        2 *
-                                                        pi,
-                                                  ) *
-                                                  6),
-                                          child: child!,
-                                        );
-                                      },
-                                      child: _buildAvatar(userData),
+                          return SizedBox(
+                            height: itemSpacing,
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              alignment: Alignment.center,
+                              children: [
+                                if (prevXOffset != null)
+                                  CustomPaint(
+                                    size: Size(screenWidth, itemSpacing),
+                                    painter: NeonPathPainter(
+                                      startX: xOffset,
+                                      endX: prevXOffset,
+                                      isPassed: isCompleted,
+                                      color: isCompleted
+                                          ? Colors.cyanAccent
+                                          : Colors.grey.withValues(alpha: 0.3),
                                     ),
-                                ],
-                              ),
+                                  ),
+                                Transform.translate(
+                                  offset: Offset(xOffset, 0),
+                                  child: GestureDetector(
+                                    onTap: isPlayable
+                                        ? () {
+                                            if (userData.hearts <= 0) {
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    'Enerjiniz bitti. Dinlenme vakti!',
+                                                  ),
+                                                ),
+                                              );
+                                              return;
+                                            }
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => QuizScreen(
+                                                  level: "A${(level / 10).ceil()}",
+                                                  levelIndex: level,
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        : null,
+                                    child: Stack(
+                                      alignment: Alignment.center,
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        HexagonLevelNode(
+                                          level: level,
+                                          isActive: isActive,
+                                          isLocked: !isPlayable,
+                                          isBoss: isBossLevel,
+                                          isCompleted: isCompleted,
+                                        ),
+                                        if (isActive)
+                                          AnimatedBuilder(
+                                            animation: _floatingController,
+                                            builder: (context, child) {
+                                              return Positioned(
+                                                top:
+                                                    -85 +
+                                                    (sin(
+                                                          _floatingController.value *
+                                                              2 *
+                                                              pi,
+                                                        ) *
+                                                        6),
+                                                child: child!,
+                                              );
+                                            },
+                                            child: _buildAvatar(userData),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                        ],
+                          );
+                        },
                       ),
-                    );
-                  },
+                    ),
+                  ],
                 ),
               ),
 
@@ -369,10 +375,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     required String label,
     required VoidCallback onTap,
   }) {
+    final sw = MediaQuery.of(context).size.width;
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: EdgeInsets.symmetric(horizontal: sw * 0.025, vertical: sw * 0.018),
         decoration: BoxDecoration(
           color: const Color(0xFF2A2A35),
           borderRadius: BorderRadius.circular(30),
@@ -387,14 +394,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ),
         child: Row(
           children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(width: 8),
+            Icon(icon, color: color, size: sw * 0.05),
+            SizedBox(width: sw * 0.015),
             Text(
               value,
               style: GoogleFonts.poppins(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize: 15,
+                fontSize: sw * 0.033,
               ),
             ),
           ],
@@ -430,7 +437,7 @@ class HexagonLevelNode extends StatelessWidget {
                     ? const Color(0xFF00E676)
                     : const Color(0xFF2979FF)));
 
-    final double size = isBoss ? 80.0 : 70.0;
+    final double size = isBoss ? 75.0 : 65.0;
     // elevation removed
 
     return Column(
@@ -475,7 +482,7 @@ class HexagonLevelNode extends StatelessWidget {
                       : Text(
                           "$level",
                           style: GoogleFonts.rubik(
-                            fontSize: 24,
+                            fontSize: size * 0.34,
                             fontWeight: FontWeight.w900,
                             color: Colors.white,
                           ),

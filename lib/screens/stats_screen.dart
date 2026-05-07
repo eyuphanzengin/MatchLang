@@ -50,6 +50,7 @@ class _MyStatsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final userData = context.watch<UserDataProvider>();
+    final sw = MediaQuery.of(context).size.width;
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -72,8 +73,8 @@ class _MyStatsTab extends StatelessWidget {
               alignment: Alignment.center,
               children: [
                 SizedBox(
-                  width: 150,
-                  height: 150,
+                  width: sw * 0.35,
+                  height: sw * 0.35,
                   child: CircularProgressIndicator(
                     value: 1.0,
                     strokeWidth: 10,
@@ -125,11 +126,13 @@ class _MyStatsTab extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 _buildStatCard(
+                  context,
                   "Doğru",
                   "${userData.todaysCorrectAnswers}",
                   Colors.green,
                 ),
                 _buildStatCard(
+                  context,
                   "Yanlış",
                   "${userData.todaysIncorrectAnswers}",
                   Colors.red,
@@ -142,10 +145,11 @@ class _MyStatsTab extends StatelessWidget {
     );
   }
 
-  Widget _buildStatCard(String title, String value, Color color) {
+  Widget _buildStatCard(BuildContext context, String title, String value, Color color) {
+    final sw = MediaQuery.of(context).size.width;
     return Container(
-      width: 100,
-      padding: const EdgeInsets.all(15),
+      width: sw * 0.28,
+      padding: EdgeInsets.all(sw * 0.035),
       decoration: BoxDecoration(
         color: Colors.grey.shade800,
         borderRadius: BorderRadius.circular(15),
