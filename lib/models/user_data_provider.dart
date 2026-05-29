@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,6 +35,20 @@ class UserDataProvider with ChangeNotifier {
   List<String> knownWords = [];
   int todaysCorrectAnswers = 0;
   int todaysIncorrectAnswers = 0;
+  int totalQuizzesPlayed = 0;
+
+  // --- ANALITIK GETTER'LAR (Chatbot icin) ---
+  double get quizAccuracy {
+    final total = todaysCorrectAnswers + todaysIncorrectAnswers;
+    if (total == 0) return 0.0;
+    return todaysCorrectAnswers / total;
+  }
+
+  List<String> get weakestWords {
+    final sorted = wordStats.entries.toList()
+      ..sort((a, b) => (b.value['wrong'] ?? 0).compareTo(a.value['wrong'] ?? 0));
+    return sorted.take(5).map((e) => e.key).toList();
+  }
 
   UserDataProvider() {
     _initUser();
@@ -67,6 +81,7 @@ class UserDataProvider with ChangeNotifier {
     isVibrationOn = true;
     todaysCorrectAnswers = 0;
     todaysIncorrectAnswers = 0;
+    totalQuizzesPlayed = 0;
     streakCount = 0;
     lastLoginDate = null;
   }
@@ -93,6 +108,7 @@ class UserDataProvider with ChangeNotifier {
       await prefs.setStringList('cached_knownWords', knownWords);
       await prefs.setInt('cached_todaysCorrect', todaysCorrectAnswers);
       await prefs.setInt('cached_todaysIncorrect', todaysIncorrectAnswers);
+      await prefs.setInt('cached_totalQuizzesPlayed', totalQuizzesPlayed);
       await prefs.setBool('cached_isSoundOn', isSoundOn);
       await prefs.setBool('cached_isVibrationOn', isVibrationOn);
       if (lastHeartTime != null) {
@@ -102,9 +118,9 @@ class UserDataProvider with ChangeNotifier {
         await prefs.setString('cached_lastLoginDate', lastLoginDate!.toIso8601String());
       }
       await prefs.setString('cached_wordStats', jsonEncode(wordStats));
-      debugPrint("[LocalCache] Veriler yerele kaydedildi.");
+      if (kDebugMode) debugPrint("[LocalCache] Veriler yerele kaydedildi.");
     } catch (e) {
-      debugPrint("[LocalCache] Kaydetme hatasi: $e");
+      if (kDebugMode) debugPrint("[LocalCache] Kaydetme hatasi: $e");
     }
   }
 
@@ -121,6 +137,7 @@ class UserDataProvider with ChangeNotifier {
       knownWords = prefs.getStringList('cached_knownWords') ?? [];
       todaysCorrectAnswers = prefs.getInt('cached_todaysCorrect') ?? 0;
       todaysIncorrectAnswers = prefs.getInt('cached_todaysIncorrect') ?? 0;
+      totalQuizzesPlayed = prefs.getInt('cached_totalQuizzesPlayed') ?? 0;
       isSoundOn = prefs.getBool('cached_isSoundOn') ?? true;
       isVibrationOn = prefs.getBool('cached_isVibrationOn') ?? true;
       final heartStr = prefs.getString('cached_lastHeartTime');
@@ -135,9 +152,9 @@ class UserDataProvider with ChangeNotifier {
           Map<String, int>.from(value as Map),
         ));
       }
-      debugPrint("[LocalCache] Veriler yerel yedekten yuklendi.");
+      if (kDebugMode) debugPrint("[LocalCache] Veriler yerel yedekten yuklendi.");
     } catch (e) {
-      debugPrint("[LocalCache] Yukleme hatasi: $e");
+      if (kDebugMode) debugPrint("[LocalCache] Yukleme hatasi: $e");
     }
   }
 
@@ -157,6 +174,7 @@ class UserDataProvider with ChangeNotifier {
         isVibrationOn = data['isVibrationOn'] ?? true;
         todaysCorrectAnswers = data['todaysCorrectAnswers'] ?? 0;
         todaysIncorrectAnswers = data['todaysIncorrectAnswers'] ?? 0;
+        totalQuizzesPlayed = data['totalQuizzesPlayed'] ?? 0;
         if (data['knownWords'] != null) {
           knownWords = List<String>.from(data['knownWords']);
         }
@@ -177,7 +195,7 @@ class UserDataProvider with ChangeNotifier {
       }
       notifyListeners();
     } catch (e) {
-      debugPrint("Firebase yukleme hatasi, yerel yedek deneniyor: $e");
+      if (kDebugMode) debugPrint("Firebase yukleme hatasi, yerel yedek deneniyor: $e");
       // Firebase baglantisi yoksa yerel yedekten yukle
       await _loadFromLocalCache();
       notifyListeners();
@@ -197,6 +215,7 @@ class UserDataProvider with ChangeNotifier {
       'isVibrationOn': true,
       'todaysCorrectAnswers': 0,
       'todaysIncorrectAnswers': 0,
+      'totalQuizzesPlayed': 0,
       'knownWords': [],
       'streakCount': 0,
       'lastLoginDate': null,
@@ -314,6 +333,7 @@ class UserDataProvider with ChangeNotifier {
     totalScore += points;
     notifyListeners();
     if (userId != null) await _userRef.update({'score': totalScore});
+    await _saveToLocalCache();
   }
 
   Future<void> completeLevel(int levelPlayed) async {
@@ -325,6 +345,7 @@ class UserDataProvider with ChangeNotifier {
         if (userId != null) await _userRef.update({'stars': stars});
       }
       notifyListeners();
+      await _saveToLocalCache();
     }
   }
 
@@ -446,6 +467,16 @@ class UserDataProvider with ChangeNotifier {
         'todaysIncorrectAnswers': todaysIncorrectAnswers,
       });
     }
+    await _saveToLocalCache();
+  }
+
+  Future<void> incrementQuizzesPlayed() async {
+    totalQuizzesPlayed++;
+    notifyListeners();
+    if (userId != null) {
+      await _userRef.update({'totalQuizzesPlayed': totalQuizzesPlayed});
+    }
+    await _saveToLocalCache();
   }
 
   Future<void> markAsKnown(String word) async {
@@ -465,7 +496,7 @@ class UserDataProvider with ChangeNotifier {
   }
 
   Future<void> seedDatabaseWithSampleQuizzes() async {
-    debugPrint("Seed fonksiyonu çağrıldı (Pasif Mod)");
+    if (kDebugMode) debugPrint("Seed fonksiyonu çağrıldı (Pasif Mod)");
   }
 
   Future<void> resetProgress() async {
@@ -475,7 +506,7 @@ class UserDataProvider with ChangeNotifier {
       _resetLocalData();
       notifyListeners();
     } catch (e) {
-      debugPrint("Reset hatası: $e");
+      if (kDebugMode) debugPrint("Reset hatası: $e");
     }
   }
 

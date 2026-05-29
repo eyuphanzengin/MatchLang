@@ -1,5 +1,40 @@
 {
     "cmake.sourceDirectory": "/home/eyuphan/Masaüstü/Her şey+/MatchLang/linux",
     "java.configuration.updateBuildConfiguration": "interactive",
-    "git.ignoreLimitWarning": true
+    "git.ignoreLimitWarning": true,
+    "python.defaultInterpreterPath": "${workspaceFolder}/backend/venv/Scripts/python.exe",
+    "python.analysis.exclude": [
+        "**/venv/**",
+        "**/backend/venv/**"
+    ],
+    "python.analysis.ignore": [
+        "**/venv/**",
+        "**/backend/venv/**"
+    ],
+    "files.exclude": {
+        "**/backend/venv": true,
+        "**/.gradle": true,
+        "**/build": true,
+        "**/.dart_tool": true
+    },
+    "search.exclude": {
+        "**/backend/venv": true,
+        "**/.gradle": true,
+        "**/build": true,
+        "**/.dart_tool": true
+    },
+    "python.linting.ignorePatterns": [
+        "**/venv/**",
+        "**/backend/venv/**"
+    ],
+    "python.linting.flake8Args": [
+        "--exclude=venv,backend/venv"
+    ],
+    "python.linting.pylintArgs": [
+        "--ignore=venv,backend/venv"
+    ],
+    "python.linting.mypyArgs": [
+        "--exclude=venv",
+        "--exclude=backend/venv"
+    ]
 }

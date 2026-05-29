@@ -1,0 +1,9 @@
+{
+  "venvPath": "backend",
+  "venv": "venv",
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "backend/venv"
+  ]
+}

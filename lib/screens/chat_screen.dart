@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -7,6 +9,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../models/user_data_provider.dart';
 import '../services/tts_manager.dart';
+import '../services/service_manager.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -58,8 +61,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void _listenForSpeech() async {
     if (!_isListening) {
       bool available = await _speech.initialize(
-        onStatus: (val) => debugPrint('onStatus: $val'),
-        onError: (val) => debugPrint('onError: $val'),
+        onStatus: (val) { if (kDebugMode) debugPrint('onStatus: $val'); },
+        onError: (val) { if (kDebugMode) debugPrint('onError: $val'); },
       );
       if (available) {
         setState(() => _isListening = true);
@@ -94,13 +97,17 @@ class _ChatScreenState extends State<ChatScreen> {
       final List<String> safeKnownWords = userData.knownWords.cast<String>();
       final List<String> safeMistakes = _getWorstMistakesList(userData);
 
-      // Android Emülatöründen bilgisayardaki localhost'a erişmek için 10.0.2.2 kullanılır.
-      const serverUrl = 'http://127.0.0.1:8000/chat';
-      // Son 6 mesajı geçmiş olarak gönderelim (Sistem mesajı hariç)
+      final String baseUrl = ServiceManager().backendBaseUrl;
+      final serverUrl = '$baseUrl/chat';
+      
+      // Son 6 mesajı geçmiş olarak gönderelim
       final history = _messages
           .where((m) => m['role'] != 'system' && m['text'] != null)
           .skip(_messages.length > 6 ? _messages.length - 6 : 0)
           .toList();
+
+      // Quiz analitiği: doğruluk, zayıf kelimeler, toplam quiz, seri
+      final int accuracyPercent = (userData.quizAccuracy * 100).round();
 
       final response = await http.post(
         Uri.parse(serverUrl),
@@ -111,8 +118,12 @@ class _ChatScreenState extends State<ChatScreen> {
           'worst_mistakes': safeMistakes,
           'message': text,
           'history': history,
+          'quiz_accuracy': accuracyPercent,
+          'weak_topics': userData.weakestWords,
+          'total_quizzes_played': userData.totalQuizzesPlayed,
+          'current_streak': userData.streakCount,
         }),
-      );
+      ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
           final data = jsonDecode(utf8.decode(response.bodyBytes));
@@ -132,11 +143,20 @@ class _ChatScreenState extends State<ChatScreen> {
           });
       }
       _scrollToBottom();
+    } on TimeoutException {
+      setState(() {
+        _messages.add({
+          'role': 'bot',
+          'text': '⏳ Sunucu yanıt vermedi. Lütfen backend sunucusunun çalıştığından emin ol ve tekrar dene.',
+        });
+        _isLoading = false;
+      });
+      _scrollToBottom();
     } catch (e) {
       setState(() {
         _messages.add({
           'role': 'bot',
-          'text': 'Baglanti kurulamadi. Lutfen Python FastAPI sunucusunun arkada calistigindan emin ol.\n\n(Hata: $e)',
+          'text': '🔌 Bağlantı kurulamadı. Python FastAPI sunucusunun çalıştığından emin ol.\n\n(Hata: $e)',
         });
         _isLoading = false;
       });

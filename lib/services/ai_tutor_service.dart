@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/content_bank.dart';
+import 'service_manager.dart';
 
 class AITutorService with ChangeNotifier {
   
@@ -42,7 +43,8 @@ class AITutorService with ChangeNotifier {
     int level,
     String topic,
   ) async {
-    const serverUrl = 'http://127.0.0.1:8000/generate_quiz';
+    final String baseUrl = ServiceManager().backendBaseUrl;
+    final serverUrl = '$baseUrl/generate_quiz';
     
     final response = await http.post(
       Uri.parse(serverUrl),
@@ -51,14 +53,14 @@ class AITutorService with ChangeNotifier {
         'level': level,
         'topic': topic,
       }),
-    );
+    ).timeout(const Duration(seconds: 30));
 
     if (response.statusCode == 200) {
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
       // Gelen veri doğrudan JSON dizisidir (List<Map<String,dynamic>>)
       return List<Map<String, dynamic>>.from(decoded);
     } else {
-      throw Exception("Llama Sunucu Hatası: ${response.statusCode}");
+      throw Exception("Quiz sunucusu yanıt hatası: ${response.statusCode}");
     }
   }
 
@@ -159,7 +161,8 @@ class AITutorService with ChangeNotifier {
   }) async {
     // AI aktif, Llama'ya sor
     try {
-      const serverUrl = 'http://127.0.0.1:8000/explain';
+      final String baseUrl = ServiceManager().backendBaseUrl;
+      final serverUrl = '$baseUrl/explain';
       final response = await http.post(
         Uri.parse(serverUrl),
         headers: {'Content-Type': 'application/json'},

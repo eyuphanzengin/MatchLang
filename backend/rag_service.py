@@ -33,7 +33,7 @@ class ChromaRagService:
                 metadatas=metadatas,
                 ids=ids
             )
-            print(f"[RAG] Belge '{doc_id}' vektörize edildi ve veritabanına {len(chunks)} parça eklendi.")
+            print(f"[RAG] Document '{doc_id}' vectorized. Added {len(chunks)} chunks.")
 
     def get_relevant_context(self, query: str, n_results: int = 3) -> str:
         """Sorguya yapısal ve anlamsal (semantic) olarak en benzer parçaları bulur."""
@@ -53,7 +53,7 @@ class ChromaRagService:
         if results and results['documents'] and len(results['documents'][0]) > 0:
             relevant_chunks = results['documents'][0]
             built_context = "\n---\n".join(relevant_chunks)
-            print(f"[RAG SEARCH] '{query}' için veri çekildi! (Bulunan parça: {len(relevant_chunks)})")
+            print(f"[RAG SEARCH] Search complete. Found {len(relevant_chunks)} chunks.")
             return built_context
             
         return ""

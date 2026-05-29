@@ -7,8 +7,11 @@ from fastapi.responses import Response
 from gtts import gTTS
 import io
 import json
+import logging
 import random
 import uvicorn
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="MatchLang AI Tutor Backend")
 
@@ -27,6 +30,10 @@ class ChatRequest(BaseModel):
     worst_mistakes: list[str]
     message: str
     history: list[dict] = []
+    quiz_accuracy: int = 0
+    weak_topics: list[str] = []
+    total_quizzes_played: int = 0
+    current_streak: int = 0
 
 class UploadDocumentRequest(BaseModel):
     doc_id: str
@@ -49,25 +56,69 @@ async def upload_document(request: UploadDocumentRequest):
 @app.post("/chat")
 async def chat_with_tutor(request: ChatRequest):
     # Zayif kelimeleri belirt
-    weak_words_info = ""
     if request.worst_mistakes:
-        mistakes_subset = ', '.join(request.worst_mistakes[:3])
-        weak_words_info = f"\nThe user struggles with: {mistakes_subset}. Help them practice these naturally."
+        mistakes_subset = ', '.join(request.worst_mistakes[:5])
+        weak_words_info = (
+            f"\nThe user struggles with these specific words: {mistakes_subset}. "
+            "If the user asks about their mistakes, errors, or what words they got wrong, list these words clearly (in Turkish translation if asked) and offer help with them. "
+            "Otherwise, weave these words naturally into your conversation to help them practice."
+        )
+    else:
+        weak_words_info = (
+            "\nThe user has not made any mistakes yet. "
+            "If the user asks about their mistakes, errors, or wrong words, tell them that they haven't made any mistakes yet and congratulate them!"
+        )
+
+    # Quiz performans bilgisi
+    quiz_info = ""
+    if request.total_quizzes_played > 0:
+        quiz_info = (
+            f"\nQuiz stats: accuracy={request.quiz_accuracy}%, "
+            f"quizzes_played={request.total_quizzes_played}, "
+            f"streak={request.current_streak} days."
+        )
+        if request.quiz_accuracy < 50:
+            quiz_info += " The user is struggling. Use simpler words, be encouraging."
+        elif request.quiz_accuracy >= 80:
+            quiz_info += " The user is doing great! Challenge them with harder vocabulary."
+
+    if request.current_streak >= 3:
+        quiz_info += f" Congratulate them on their {request.current_streak}-day streak if relevant!"
+
+    # Zayif konular
+    weak_topics_info = ""
+    if request.weak_topics:
+        weak_topics_info = (
+            f"\nWeak topics: {', '.join(request.weak_topics[:5])}. "
+            "If the user asks about their weak topics or mistakes, list them. "
+            "Otherwise, try to incorporate these topics naturally."
+        )
 
     # RAG Context
     context = rag_db.get_relevant_context(request.message)
     context_injection = f"\nKnowledge Base:\n{context}" if context else ""
     
-    system_prompt = f"""You are MatchLang, a friendly English tutor chatbot for Turkish speakers learning English. User level: {request.level}/100.{weak_words_info}{context_injection}
+    system_prompt = f"""You are MatchLang, a friendly and charismatic English tutor for Turkish speakers. User level: {request.level}/100.{weak_words_info}{quiz_info}{weak_topics_info}{context_injection}
 
-Your behavior:
-- When the user asks you to quiz them, immediately give them an English question. For example: translate a word, fill in the blank, or ask what a word means.
-- If the user writes Turkish, answer in Turkish but include English words/sentences for learning.
-- If the user writes English, answer in English and correct mistakes.
-- Do NOT invent names for the user.
-- Do NOT say "How can I help you" or "Size nasil yardimci olabilirim" or similar phrases.
-- Do NOT repeat the same sentence twice.
-- Keep answers 2-4 sentences."""
+STRICT RULES:
+1. When the user writes Turkish, reply in Turkish but include English examples for learning.
+2. When the user writes English, reply in English and gently correct mistakes.
+3. If the user asks for a quiz/test, give them a quick exercise (translate, fill blank, etc.).
+4. Keep answers 2-4 sentences. Be concise and engaging.
+5. NEVER say "How can I help you" or "Size nasıl yardımcı olabilirim" or similar greetings.
+6. NEVER repeat the same sentence twice.
+7. NEVER invent a name for the user.
+8. When writing Turkish, use correct grammar: ğ, ü, ş, ı, ö, ç characters properly.
+
+EXAMPLE CONVERSATIONS:
+User: "Merhaba, bugün ne yapacağız?"
+You: "Bugün İngilizce pratik yapalım! 🎯 Mesela 'environment' kelimesini bilir misin? Türkçesi 'çevre' demek. Bir cümlede kullanalım: 'We should protect the environment.' Sen de bir cümle kur!"
+
+User: "I want to learn new words"
+You: "Great! Let's try 'challenge' - it means 'zorluk' in Turkish. Example: 'Learning a new language is a big challenge.' Can you make your own sentence with this word?"
+
+User: "book ne demek?"
+You: "'Book' Türkçede 'kitap' demek! 📚 Örnek cümle: 'I read a book every week.' Sen de 'book' ile bir cümle kurabilir misin?" """
     
     messages = [{'role': 'system', 'content': system_prompt}]
     
@@ -82,6 +133,9 @@ Your behavior:
     if not messages or messages[-1]['content'] != request.message:
         messages.append({'role': 'user', 'content': request.message})
 
+    print(f"[DEBUG CHAT] message: {request.message}")
+    print(f"[DEBUG CHAT] worst_mistakes: {request.worst_mistakes}, weak_topics: {request.weak_topics}")
+    print(f"[DEBUG CHAT] system_prompt:\n{system_prompt}\n")
     try:
         response = ollama.chat(
             model='qwen2.5:3b', 
@@ -92,6 +146,7 @@ Your behavior:
             }
         )
         reply = response['message']['content']
+        print(f"[DEBUG CHAT] LLM reply: {reply}")
         
         # Son savunma: Yasakli kaliplari temizle
         banned = [
@@ -171,18 +226,51 @@ async def generate_quiz(request: QuizRequest):
             "sister": "kız kardeş", "brother": "erkek kardeş", "baby": "bebek",
             "ball": "top", "hat": "şapka", "shoe": "ayakkabı", "bag": "çanta",
             "star": "yıldız", "rain": "yağmur", "snow": "kar", "egg": "yumurta",
+            "nose": "burun", "ear": "kulak", "mouth": "ağız", "foot": "ayak",
+            "head": "kafa", "hair": "saç", "leg": "bacak", "arm": "kol",
+            "boy": "erkek çocuk", "girl": "kız çocuk", "man": "adam", "woman": "kadın",
+            "teacher": "öğretmen", "student": "öğrenci", "friend": "arkadaş",
+            "coffee": "kahve", "tea": "çay", "sugar": "şeker", "salt": "tuz",
+            "rice": "pirinç", "meat": "et", "chicken": "tavuk", "cheese": "peynir",
+            "orange": "portakal", "banana": "muz", "grape": "üzüm", "lemon": "limon",
+            "tomato": "domates", "potato": "patates", "onion": "soğan",
+            "four": "dört", "five": "beş", "six": "altı", "seven": "yedi",
+            "eight": "sekiz", "nine": "dokuz", "ten": "on",
+            "big": "büyük", "small": "küçük", "hot": "sıcak", "cold": "soğuk",
+            "new": "yeni", "old": "eski", "good": "iyi", "bad": "kötü",
+            "happy": "mutlu", "sad": "üzgün", "hungry": "aç",
+            "window": "pencere", "room": "oda", "bed": "yatak", "phone": "telefon",
+            "bus": "otobüs", "train": "tren", "plane": "uçak", "boat": "tekne",
         },
         'A2': {
             "kitchen": "mutfak", "bedroom": "yatak odası", "garden": "bahçe",
-            "bridge": "köprü", "rain": "yağmur", "snow": "kar", "cloud": "bulut",
-            "wind": "rüzgar", "breakfast": "kahvaltı", "lunch": "öğle yemeği",
-            "dinner": "akşam yemeği", "ticket": "bilet", "airport": "havalimanı",
-            "hospital": "hastane", "library": "kütüphane", "neighbor": "komşu",
-            "journey": "yolculuk", "hungry": "aç", "thirsty": "susuz",
-            "tired": "yorgun", "beautiful": "güzel", "dangerous": "tehlikeli",
-            "cheap": "ucuz", "expensive": "pahalı", "heavy": "ağır",
-            "light": "hafif", "fast": "hızlı", "slow": "yavaş",
+            "bridge": "köprü", "cloud": "bulut", "wind": "rüzgar",
+            "breakfast": "kahvaltı", "lunch": "öğle yemeği", "dinner": "akşam yemeği",
+            "ticket": "bilet", "airport": "havalimanı", "hospital": "hastane",
+            "library": "kütüphane", "neighbor": "komşu", "journey": "yolculuk",
+            "thirsty": "susuz", "tired": "yorgun", "beautiful": "güzel",
+            "dangerous": "tehlikeli", "cheap": "ucuz", "expensive": "pahalı",
+            "heavy": "ağır", "light": "hafif", "fast": "hızlı", "slow": "yavaş",
             "early": "erken", "late": "geç", "island": "ada", "village": "köy",
+            "city": "şehir", "country": "ülke", "mountain": "dağ", "river": "nehir",
+            "lake": "göl", "sea": "deniz", "forest": "orman", "desert": "çöl",
+            "passport": "pasaport", "hotel": "otel", "map": "harita",
+            "road": "yol", "street": "cadde", "corner": "köşe",
+            "market": "market", "money": "para", "price": "fiyat",
+            "clothes": "kıyafet", "shirt": "gömlek", "doctor": "doktor",
+            "medicine": "ilaç", "weather": "hava durumu", "summer": "yaz",
+            "winter": "kış", "spring": "ilkbahar", "autumn": "sonbahar",
+            "holiday": "tatil", "job": "iş", "office": "ofis",
+            "meeting": "toplantı", "manager": "müdür", "worker": "çalışan",
+            "email": "e-posta", "address": "adres", "language": "dil",
+            "question": "soru", "answer": "cevap", "problem": "sorun",
+            "idea": "fikir", "dream": "rüya", "story": "hikaye",
+            "newspaper": "gazete", "magazine": "dergi", "page": "sayfa",
+            "letter": "mektup", "gift": "hediye", "birthday": "doğum günü",
+            "wedding": "düğün", "game": "oyun", "team": "takım",
+            "match": "maç", "player": "oyuncu", "winner": "kazanan",
+            "angry": "kızgın", "afraid": "korkmuş", "surprised": "şaşırmış",
+            "honest": "dürüst", "lazy": "tembel", "brave": "cesur",
         },
         'B1': {
             "knowledge": "bilgi", "experience": "deneyim", "environment": "çevre",
@@ -193,14 +281,69 @@ async def generate_quiz(request: QuizRequest):
             "discover": "keşfetmek", "suggest": "önermek", "achieve": "başarmak",
             "polite": "kibar", "enormous": "devasa", "curious": "meraklı",
             "ancient": "antik", "seldom": "nadiren", "perhaps": "belki",
+            "accident": "kaza", "emergency": "acil durum", "insurance": "sigorta",
+            "complaint": "şikayet", "satisfaction": "memnuniyet",
+            "advertisement": "reklam", "connection": "bağlantı",
+            "communication": "iletişim", "population": "nüfus",
+            "tradition": "gelenek", "culture": "kültür", "religion": "din",
+            "government": "hükümet", "election": "seçim", "law": "hukuk",
+            "economy": "ekonomi", "industry": "sanayi", "agriculture": "tarım",
+            "technology": "teknoloji", "software": "yazılım", "data": "veri",
+            "research": "araştırma", "experiment": "deney", "theory": "teori",
+            "education": "eğitim", "degree": "derece", "certificate": "sertifika",
+            "skill": "beceri", "talent": "yetenek", "ability": "yeterlilik",
+            "confidence": "güven", "patience": "sabır", "courage": "cesaret",
+            "freedom": "özgürlük", "justice": "adalet", "equality": "eşitlik",
+            "responsibility": "sorumluluk", "behavior": "davranış",
+            "attitude": "tutum", "opinion": "görüş", "argument": "tartışma",
+            "discussion": "tartışma", "conclusion": "sonuç", "evidence": "kanıt",
+            "influence": "etki", "effect": "etki", "cause": "sebep",
+            "process": "süreç", "method": "yöntem", "strategy": "strateji",
+            "progress": "ilerleme", "development": "gelişme", "growth": "büyüme",
+            "decline": "düşüş", "increase": "artış", "decrease": "azalış",
+            "success": "başarı", "failure": "başarısızlık", "effort": "çaba",
         },
         'B2': {
-            "consequence": "sonuç", "circumstance": "durum", "perspective": "bakış açısı",
-            "determination": "kararlılık", "enthusiasm": "heyecan",
-            "emphasize": "vurgulamak", "investigate": "araştırmak",
-            "reluctant": "isteksiz", "inevitable": "kaçınılmaz",
-            "significant": "önemli", "controversial": "tartışmalı",
-            "genuine": "gerçek", "revenue": "gelir", "phenomenon": "olgu",
+            "consequence": "sonuç", "circumstance": "durum",
+            "perspective": "bakış açısı", "determination": "kararlılık",
+            "enthusiasm": "heyecan", "emphasize": "vurgulamak",
+            "investigate": "araştırmak", "reluctant": "isteksiz",
+            "inevitable": "kaçınılmaz", "significant": "önemli",
+            "controversial": "tartışmalı", "genuine": "gerçek",
+            "revenue": "gelir", "phenomenon": "olgu",
+            "ambiguous": "belirsiz", "comprehensive": "kapsamlı",
+            "contemporary": "çağdaş", "sophisticated": "sofistike",
+            "sustainable": "sürdürülebilir", "transparent": "şeffaf",
+            "abstract": "soyut", "concrete": "somut",
+            "autonomous": "özerk", "bureaucracy": "bürokrasi",
+            "catastrophe": "felaket", "coincidence": "tesadüf",
+            "contradiction": "çelişki", "controversy": "tartışma",
+            "dilemma": "ikilem", "discrimination": "ayrımcılık",
+            "epidemic": "salgın", "exploitation": "sömürü",
+            "hypothesis": "hipotez", "ideology": "ideoloji",
+            "implementation": "uygulama", "infrastructure": "altyapı",
+            "innovation": "yenilik", "intervention": "müdahale",
+            "legislation": "mevzuat", "manipulation": "manipülasyon",
+            "negotiation": "müzakere", "obligation": "yükümlülük",
+            "perception": "algı", "privilege": "ayrıcalık",
+            "propaganda": "propaganda", "prosperity": "refah",
+            "rehabilitation": "rehabilitasyon", "revolution": "devrim",
+            "sacrifice": "fedakarlık", "solidarity": "dayanışma",
+            "speculation": "spekülasyon", "stereotype": "kalıp yargı",
+            "surveillance": "gözetim", "tolerance": "hoşgörü",
+            "transformation": "dönüşüm", "transition": "geçiş",
+            "vulnerability": "savunmasızlık", "welfare": "refah",
+            "acquisition": "edinim", "allegation": "iddia",
+            "assessment": "değerlendirme", "assumption": "varsayım",
+            "collaboration": "işbirliği", "compensation": "tazminat",
+            "configuration": "yapılandırma", "consolidation": "birleştirme",
+            "consultation": "danışma", "deterioration": "bozulma",
+            "distinction": "ayrım", "domination": "hakimiyet",
+            "elimination": "eleme", "emergence": "ortaya çıkış",
+            "fluctuation": "dalgalanma", "foundation": "temel",
+            "globalization": "küreselleşme", "implication": "ima",
+            "inclination": "eğilim", "integration": "entegrasyon",
+            "justification": "gerekçe", "maintenance": "bakım",
         },
     }
 
@@ -219,7 +362,7 @@ async def generate_quiz(request: QuizRequest):
             if en in dict_for_level:
                 correct_tr = dict_for_level[en]
                 if tr.lower() != correct_tr.lower():
-                    print(f"[QuizFix] '{en}': '{tr}' -> '{correct_tr}'")
+                    logger.info(f"[QuizFix] '{en}': '{tr}' -> '{correct_tr}'")
                     tr = correct_tr
             
             # Ayni kelimeden 2 tane varsa (UI'da bug yapar) atla

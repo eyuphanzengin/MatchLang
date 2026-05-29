@@ -48,4 +48,22 @@ class ServiceManager {
   
   // TTS için karar mekanizması
   bool get shouldUseCloudTts => _isEmulator; // Eğer emülatörse bulut(gTTS) kullan
+
+  // Backend adresi (Emülatörler ve gerçek cihazlar için localhost yönlendirmesi)
+  String get backendBaseUrl {
+    if (kIsWeb) {
+      return 'http://127.0.0.1:8000';
+    }
+    try {
+      if (Platform.isAndroid) {
+        if (_isEmulator) {
+          return 'http://10.0.2.2:8000';
+        } else {
+          // Gerçek Android cihazlarda 'adb reverse tcp:8000 tcp:8000' ile localhost yönlendirilir.
+          return 'http://127.0.0.1:8000';
+        }
+      }
+    } catch (_) {}
+    return 'http://127.0.0.1:8000';
+  }
 }

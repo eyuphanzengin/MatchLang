@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -139,7 +140,7 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
       if (isValid) {
         validQuestions.add(q);
       } else {
-        debugPrint("[QuizFilter] Gecersiz soru atildi: $q");
+        if (kDebugMode) debugPrint("[QuizFilter] Gecersiz soru atildi: $q");
       }
     }
 
@@ -231,7 +232,7 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
         }
       }
     } catch (e) {
-      debugPrint("Mistake record error: $e");
+      if (kDebugMode) debugPrint("Mistake record error: $e");
     }
   }
 
@@ -327,6 +328,9 @@ class _QuizScreenState extends State<QuizScreen> with TickerProviderStateMixin {
     context.read<UserDataProvider>().saveMistakesBatch(
       _sessionMistakes.toList(),
     );
+
+    // Quiz sayacını artır
+    context.read<UserDataProvider>().incrementQuizzesPlayed();
 
     final duration = DateTime.now().difference(_startTime);
     final totalQuestions = _questions.length;
@@ -867,7 +871,9 @@ class _ListeningAssemblyWidgetState extends State<ListeningAssemblyWidget> {
         .toLowerCase()
         .replaceAll(RegExp(r'[^\w\s]'), '');
 
-    bool correct = userSentence == target;
+    // Fuzzy matching: %80 benzerlik yeterli
+    double similarity = userSentence.similarityTo(target);
+    bool correct = userSentence == target || similarity >= 0.80;
 
     setState(() {
       _isChecked = true;
@@ -1350,7 +1356,9 @@ class _TranslateState extends State<TranslateQuestionWidget> {
         .join(" ")
         .trim();
 
-    bool correct = userSentence == target;
+    // Fuzzy matching: %80 benzerlik yeterli
+    double similarity = userSentence.similarityTo(target);
+    bool correct = userSentence == target || similarity >= 0.80;
 
     setState(() {
       _isChecked = true;

@@ -1,5 +1,6 @@
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
+import 'service_manager.dart';
 
 class TtsManager {
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -51,7 +52,8 @@ class TtsManager {
         await stop();
       }
       _isSpeaking = true;
-      String url = 'http://127.0.0.1:8000/tts?text=${Uri.encodeComponent(text)}&lang=$lang&slow=$slow';
+      final String baseUrl = ServiceManager().backendBaseUrl;
+      String url = '$baseUrl/tts?text=${Uri.encodeComponent(text)}&lang=$lang&slow=$slow';
       await _audioPlayer.play(UrlSource(url));
     } catch (e) {
       _isSpeaking = false;
