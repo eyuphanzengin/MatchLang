@@ -53,15 +53,32 @@ async def upload_document(request: UploadDocumentRequest):
     rag_db.add_document(request.doc_id, request.content)
     return {"status": "success", "message": f"Document {request.doc_id} uploaded successfully."}
 
+ALL_WORDS = {}  # Flat lookup: en -> tr (from VERIFY_DICT)
+
 @app.post("/chat")
 async def chat_with_tutor(request: ChatRequest):
-    # Zayif kelimeleri belirt
+    # Lazy init ALL_WORDS from VERIFY_DICT (defined in generate_quiz)
+    if not ALL_WORDS:
+        for level_dict in _get_verify_dict().values():
+            ALL_WORDS.update(level_dict)
+
+    # Zayif kelimeleri belirt - DOGRULANMIS CEVIRILERLE
     if request.worst_mistakes:
-        mistakes_subset = ', '.join(request.worst_mistakes[:5])
+        annotated = []
+        for w in request.worst_mistakes[:5]:
+            tr = ALL_WORDS.get(w.lower(), None)
+            if tr:
+                annotated.append(f"{w} (= {tr})")
+            else:
+                annotated.append(w)
+        mistakes_str = ', '.join(annotated)
         weak_words_info = (
-            f"\nThe user struggles with these specific words: {mistakes_subset}. "
-            "If the user asks about their mistakes, errors, or what words they got wrong, list these words clearly (in Turkish translation if asked) and offer help with them. "
-            "Otherwise, weave these words naturally into your conversation to help them practice."
+            f"\nCRITICAL DATA - The user's mistake words with VERIFIED translations: {mistakes_str}. "
+            "RULES FOR THESE WORDS: "
+            "1) If the user asks about their mistakes/errors/wrong words, you MUST IMMEDIATELY list ALL these words with the exact Turkish translations shown in parentheses. Do NOT ask follow-up questions, just list them directly. "
+            "2) Use ONLY the translations shown in parentheses. Do NOT invent your own translations. "
+            "3) After listing, offer to practice these words with example sentences. "
+            "4) In normal conversation, weave these words naturally to help the user practice."
         )
     else:
         weak_words_info = (
@@ -133,9 +150,16 @@ You: "'Book' Türkçede 'kitap' demek! 📚 Örnek cümle: 'I read a book every 
     if not messages or messages[-1]['content'] != request.message:
         messages.append({'role': 'user', 'content': request.message})
 
-    print(f"[DEBUG CHAT] message: {request.message}")
-    print(f"[DEBUG CHAT] worst_mistakes: {request.worst_mistakes}, weak_topics: {request.weak_topics}")
-    print(f"[DEBUG CHAT] system_prompt:\n{system_prompt}\n")
+    def _safe_print(msg: str):
+        """Print safely on Windows CP1252 terminals."""
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            print(msg.encode('ascii', 'replace').decode())
+
+    _safe_print(f"[DEBUG CHAT] message: {request.message}")
+    _safe_print(f"[DEBUG CHAT] worst_mistakes: {request.worst_mistakes}, weak_topics: {request.weak_topics}")
+    _safe_print(f"[DEBUG CHAT] system_prompt (length={len(system_prompt)})")
     try:
         response = ollama.chat(
             model='qwen2.5:3b', 
@@ -146,7 +170,7 @@ You: "'Book' Türkçede 'kitap' demek! 📚 Örnek cümle: 'I read a book every 
             }
         )
         reply = response['message']['content']
-        print(f"[DEBUG CHAT] LLM reply: {reply}")
+        _safe_print(f"[DEBUG CHAT] LLM reply: {reply}")
         
         # Son savunma: Yasakli kaliplari temizle
         banned = [
@@ -200,20 +224,10 @@ async def generate_tts(text: str, lang: str = "en", slow: bool = False):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/generate_quiz")
-async def generate_quiz(request: QuizRequest):
-
-    cefr = 'A1'
-    if request.level >= 76: cefr = 'B2'
-    elif request.level >= 51: cefr = 'B1'
-    elif request.level >= 26: cefr = 'A2'
-
-    # ============================================================
-    # DOGRULAMA SOZLUGU: AI match ciftleri uretir, sozluk ile
-    # dogrulanir. Yanlis ceviri varsa duzeltilir.
-    # AI bilinmeyen kelime uretirse guvenilir.
-    # ============================================================
-    VERIFY_DICT = {
+def _get_verify_dict():
+    """VERIFY_DICT: Tum seviyelerdeki dogrulanmis kelime cevirileri.
+    Hem /chat hem /generate_quiz endpoint'leri tarafindan kullanilir."""
+    return {
         'A1': {
             "cat": "kedi", "dog": "köpek", "bird": "kuş", "fish": "balık",
             "tree": "ağaç", "apple": "elma", "water": "su", "book": "kitap",
@@ -347,7 +361,69 @@ async def generate_quiz(request: QuizRequest):
         },
     }
 
+def _get_verified_sentences():
+    """VERIFIED_SENTENCES: Tum seviyelerdeki dogrulanmis ve kaliteli cumle cevirileri."""
+    return {
+        'A1': [
+            {"en": "I like reading books.", "tr": "Kitap okumayı severim."},
+            {"en": "She lives in a big house.", "tr": "O, büyük bir evde yaşıyor."},
+            {"en": "We eat breakfast at eight o'clock.", "tr": "Saat sekizde kahvaltı yaparız."},
+            {"en": "He has a dog and a cat.", "tr": "Onun bir köpeği ve bir kedisi var."},
+            {"en": "The weather is very nice today.", "tr": "Bugün hava çok güzel."},
+            {"en": "I want to drink water.", "tr": "Su içmek istiyorum."},
+            {"en": "They go to school by bus.", "tr": "Okula otobüsle gidiyorlar."},
+            {"en": "My brother plays football.", "tr": "Erkek kardeşim futbol oynar."},
+            {"en": "Where is the nearest supermarket?", "tr": "En yakın süpermarket nerede?"},
+            {"en": "I can speak a little English.", "tr": "Biraz İngilizce konuşabiliyorum."}
+        ],
+        'A2': [
+            {"en": "I visited my grandparents last weekend.", "tr": "Geçen hafta sonu büyükanne ve büyükbabamı ziyaret ettim."},
+            {"en": "Could you please help me with this bag?", "tr": "Lütfen bu çanta için bana yardım edebilir misiniz?"},
+            {"en": "He decided to buy a new car.", "tr": "Yeni bir araba almaya karar verdi."},
+            {"en": "We are planning to go on holiday in July.", "tr": "Temmuz ayında tatile gitmeyi planlıyoruz."},
+            {"en": "She works as a nurse at the local hospital.", "tr": "Yerel hastanede hemşire olarak çalışıyor."},
+            {"en": "Learning a new language takes time and patience.", "tr": "Yeni bir dil öğrenmek zaman ve sabır gerektirir."},
+            {"en": "I forgot my keys at home this morning.", "tr": "Bu sabah anahtarlarımı evde unuttum."},
+            {"en": "They have been living in this city for five years.", "tr": "Beş yıldır bu şehirde yaşıyorlar."},
+            {"en": "If it rains tomorrow, we will stay at home.", "tr": "Yarın yağmur yağarsa evde kalacağız."},
+            {"en": "He runs faster than his classmates.", "tr": "Sınıf arkadaşlarından daha hızlı koşar."}
+        ],
+        'B1': [
+            {"en": "Although it was raining, they went for a walk in the park.", "tr": "Yağmur yağmasına rağmen parkta yürüyüşe çıktılar."},
+            {"en": "She has been looking for a job since she graduated from university.", "tr": "Üniversiteden mezun olduğundan beri iş arıyor."},
+            {"en": "I would appreciate it if you could send me the details.", "tr": "Detayları bana gönderebilirseniz memnun olurum."},
+            {"en": "The exhibition attracts thousands of visitors every month.", "tr": "Sergi her ay binlerce ziyaretçi çekiyor."},
+            {"en": "We must reduce our carbon footprint to protect the environment.", "tr": "Çevreyi korumak için karbon ayak izimizi azaltmalıyız."},
+            {"en": "The manager explained the new project guidelines clearly.", "tr": "Müdür, yeni proje yönergelerini net bir şekilde açıkladı."},
+            {"en": "He is considered to be one of the most successful artists of his generation.", "tr": "Kendi neslinin en başarılı sanatçılarından biri olarak kabul ediliyor."},
+            {"en": "I am looking forward to meeting you next week.", "tr": "Gelecek hafta sizinle görüşmeyi dört gözle bekliyorum."},
+            {"en": "The research suggests that regular exercise improves mental health.", "tr": "Araştırma, düzenli egzersizin ruh sağlığını iyileştirdiğini gösteriyor."},
+            {"en": "She was surprised by the unexpected gift from her colleagues.", "tr": "Meslektaşlarından gelen beklenmedik hediye karşısında şaşırdı."}
+        ],
+        'B2': [
+            {"en": "The government has implemented new policies to tackle rising unemployment.", "tr": "Hükümet, artan işsizlikle mücadele etmek için yeni politikalar uyguladı."},
+            {"en": "He made a significant contribution to the scientific community.", "tr": "Bilim camiasına önemli bir katkıda bulundu."},
+            {"en": "We need to analyze the data thoroughly before drawing a conclusion.", "tr": "Bir sonuca varmadan önce verileri derinlemesine analiz etmeliyiz."},
+            {"en": "She managed to overcome the obstacles despite facing many difficulties.", "tr": "Birçok zorlukla karşılaşmasına rağmen engelleri aşmayı başardı."},
+            {"en": "The development of artificial intelligence has revolutionized many industries.", "tr": "Yapay zekanın gelişimi birçok endüstride devrim yarattı."},
+            {"en": "He expressed concern about the potential consequences of the decision.", "tr": "Kararın potansiyel sonuçları hakkında endişesini dile getirdi."},
+            {"en": "The company plans to expand its operations in foreign markets.", "tr": "Şirket, dış pazarlardaki operasyonlarını genişletmeyi planlıyor."},
+            {"en": "She was praised for her exceptional leadership skills during the crisis.", "tr": "Kriz sırasındaki olağanüstü liderlik becerilerinden dolayı takdir edildi."},
+            {"en": "He is studying the correlation between economic growth and education levels.", "tr": "Ekonomik büyüme ile eğitim seviyeleri arasındaki korelasyonu inceliyor."},
+            {"en": "Environmental protection should be a priority for all nations.", "tr": "Çevrenin korunması tüm uluslar için bir öncelik olmalıdır."}
+        ]
+    }
+
+@app.post("/generate_quiz")
+async def generate_quiz(request: QuizRequest):
+    cefr = 'A1'
+    if request.level >= 76: cefr = 'B2'
+    elif request.level >= 51: cefr = 'B1'
+    elif request.level >= 26: cefr = 'A2'
+
+    VERIFY_DICT = _get_verify_dict()
     dict_for_level = VERIFY_DICT.get(cefr, VERIFY_DICT['A1'])
+    sentences_pool = _get_verified_sentences().get(cefr, _get_verified_sentences()['A1'])
 
     def validate_match_pairs(pairs):
         """AI'nin urettigi match ciftlerini dogrula ve duzelt."""
@@ -373,17 +449,151 @@ async def generate_quiz(request: QuizRequest):
             seen_tr.add(tr.lower())
             validated.append({"en": en, "tr": tr})
         return validated
+
     def generate_fallback_match():
         """AI basarisiz olursa yedek match sorusu."""
         items = [{"en": k, "tr": v} for k, v in dict_for_level.items()]
         selected = random.sample(items, min(5, len(items)))
         return {"type": "match", "question": "Kelimeleri Eşleştir", "pairs": selected}
 
-    prompt = f"""You are a language quiz generator. Create a quiz for English learners at CEFR level {cefr} (level {request.level}/100).
+    def generate_fallback_choice():
+        """Yedek multiple choice sorusu."""
+        en_word, tr_word = random.choice(list(dict_for_level.items()))
+        other_words = [w for w in dict_for_level.keys() if w != en_word]
+        distractors = random.sample(other_words, min(3, len(other_words)))
+        
+        # 50% ihtimalle Ingilizce->Turkce veya Turkce->Ingilizce sor
+        if random.random() < 0.5:
+            options = [en_word] + distractors
+            random.shuffle(options)
+            return {
+                "type": "choice",
+                "question": f"'{tr_word}' kelimesinin İngilizcesi nedir?",
+                "options": options,
+                "answer": en_word
+            }
+        else:
+            tr_options = [dict_for_level[en_word]] + [dict_for_level[w] for w in distractors]
+            random.shuffle(tr_options)
+            return {
+                "type": "choice",
+                "question": f"'{en_word.capitalize()}' kelimesinin Türkçesi nedir?",
+                "options": tr_options,
+                "answer": dict_for_level[en_word]
+            }
+
+    def clean_and_verify_choice_question(q):
+        """AI choice sorusunu dogrular, secenekleri ve soru metnini duzeltir."""
+        question_text = q.get('question', '')
+        options = q.get('options', [])
+        answer = q.get('answer', '')
+        
+        if not options or not answer:
+            return None
+            
+        answer_lower = answer.strip().lower()
+        
+        # ALL_WORDS'e bakalim (main.py global ALL_WORDS)
+        global ALL_WORDS
+        if not ALL_WORDS:
+            for level_dict in VERIFY_DICT.values():
+                ALL_WORDS.update(level_dict)
+                
+        # Cevap dogrulanmis sozlukte var mi?
+        is_english_ans = answer_lower in ALL_WORDS
+        is_turkish_ans = False
+        for en, tr in ALL_WORDS.items():
+            if tr.lower() == answer_lower:
+                is_turkish_ans = True
+                break
+                
+        if not is_english_ans and not is_turkish_ans:
+            # Cevap sozlukte yoksa, guvenlik icin bu soruyu reddedelim (veya AI yabanci dilde kelimeler uretmisse)
+            logger.warning(f"[QuizFix] Rejected choice question because answer '{answer}' is not in verified vocabulary.")
+            return None
+            
+        # Seceneklerde dogru cevap olmali
+        if answer not in options:
+            if len(options) < 4:
+                options.append(answer)
+            else:
+                options[0] = answer
+                random.shuffle(options)
+                
+        # Cevap İngilizce mi?
+        if is_english_ans:
+            tr_word = ALL_WORDS[answer_lower]
+            q['question'] = f"'{tr_word}' kelimesinin İngilizcesi nedir?"
+            # Diger seceneklerin de İngilizce kelimeler oldugundan emin olalim, yoksa yerlerine rastgele koyalim
+            for i, opt in enumerate(options):
+                opt_lower = opt.strip().lower()
+                if opt_lower != answer_lower and opt_lower not in ALL_WORDS:
+                    fallback_en = random.choice([w for w in dict_for_level.keys() if w != answer_lower])
+                    options[i] = fallback_en
+            return q
+            
+        # Cevap Türkçe mi?
+        if is_turkish_ans:
+            english_word = ""
+            for en, tr in ALL_WORDS.items():
+                if tr.lower() == answer_lower:
+                    english_word = en
+                    break
+            q['question'] = f"'{english_word.capitalize()}' kelimesinin Türkçesi nedir?"
+            # Diger seceneklerin de Turkce kelimeler oldugundan emin olalim, yoksa yerlerine rastgele koyalim
+            for i, opt in enumerate(options):
+                opt_lower = opt.strip().lower()
+                is_tr = False
+                for en, tr in ALL_WORDS.items():
+                    if tr.lower() == opt_lower:
+                        is_tr = True
+                        break
+                if opt_lower != answer_lower and not is_tr:
+                    fallback_en = random.choice([w for w in dict_for_level.keys() if w != english_word])
+                    options[i] = dict_for_level[fallback_en]
+            return q
+            
+        return q
+
+    # 4 Cumle tabanli soruyu dogrulanmis havuzumuzdan secelim (2 translate_sentence, 2 audio_assembly)
+    selected_sentences = random.sample(sentences_pool, 4)
+
+    try:
+        ts_questions = []
+        for s in selected_sentences[:2]:
+            ts_questions.append({
+                "type": "translate_sentence",
+                "question": "Bu cümleyi çevir",
+                "sentence": s["en"],
+                "answer": s["tr"]
+            })
+            
+        aa_questions = []
+        for s in selected_sentences[2:]:
+            words_cleaned = s["en"].replace('.', '').replace(',', '').replace('?', '').replace('!', '').replace(';', '')
+            words = [w.strip() for w in words_cleaned.split() if w.strip()]
+            potential_distractors = [
+                w.lower() for w in dict_for_level.keys() 
+                if w.lower() not in [x.lower() for x in words]
+            ]
+            if len(potential_distractors) < 3:
+                potential_distractors = ["running", "eating", "flying", "happy", "blue", "today"]
+            distractors = random.sample(potential_distractors, min(3, len(potential_distractors)))
+            aa_questions.append({
+                "type": "audio_assembly",
+                "question": "Duyduğun cümleyi oluştur",
+                "target": s["en"],
+                "distractors": distractors
+            })
+
+        # AI ile sadece kelime eslestirme ve secenekli sorulari uretmeye calisalim
+        ai_questions = []
+        try:
+            prompt = f"""You are a language quiz generator. Create a vocabulary quiz for English learners at CEFR level {cefr} (level {request.level}/100).
 Topic: {request.topic}.
 
 You MUST return a valid JSON object with a "questions" key containing an array of exactly 10 questions.
-Use these 4 question types:
+Only generate these 2 types of questions:
 
 Type 1 - "match": Word matching. EVERY pair must have CORRECT English-Turkish translation!
 {{"type":"match","question":"Kelimeleri Eslestir","pairs":[{{"en":"cat","tr":"kedi"}},{{"en":"dog","tr":"kopek"}},{{"en":"bird","tr":"kus"}},{{"en":"fish","tr":"balik"}},{{"en":"tree","tr":"agac"}}]}}
@@ -391,49 +601,92 @@ Type 1 - "match": Word matching. EVERY pair must have CORRECT English-Turkish tr
 Type 2 - "choice": Multiple choice
 {{"type":"choice","question":"'Kitap' kelimesinin Ingilizcesi nedir?","options":["book","pen","table","chair"],"answer":"book"}}
 
-Type 3 - "translate_sentence": Sentence translation
-{{"type":"translate_sentence","question":"Bu cumleyi cevir","sentence":"I like reading books","answer":"Kitap okumayi severim"}}
-
-Type 4 - "audio_assembly": Build the sentence
-{{"type":"audio_assembly","question":"Duydugun cumleyi olustur","target":"The cat is sleeping","distractors":["running","eating","flying"]}}
-
 CRITICAL RULES:
-- Include 2 match, 4 choice, 2 translate_sentence, 2 audio_assembly.
-- For match: each pair MUST have correct English-Turkish translation. Double check!
+- Generate 4 match questions and 6 choice questions.
+- For match: each pair MUST have correct English-Turkish translation from the CEFR {cefr} level.
 - Return {{"questions": [...]}} with exactly 10 items. No null values."""
 
-    try:
-        response = ollama.chat(model='qwen2.5:3b', messages=[
-            {'role': 'user', 'content': prompt}
-        ], format='json')
-        
-        raw_content = response['message']['content']
-        raw_content = raw_content.replace('```json', '').replace('```', '').strip()
-        parsed = json.loads(raw_content)
-        
-        ai_questions = []
-        if isinstance(parsed, dict) and 'questions' in parsed:
-            ai_questions = parsed['questions']
-        elif isinstance(parsed, list):
-            ai_questions = parsed
+            response = ollama.chat(model='qwen2.5:3b', messages=[
+                {'role': 'user', 'content': prompt}
+            ], format='json')
+            
+            raw_content = response['message']['content']
+            raw_content = raw_content.replace('```json', '').replace('```', '').strip()
+            parsed = json.loads(raw_content)
+            
+            if isinstance(parsed, dict) and 'questions' in parsed:
+                ai_questions = parsed['questions']
+            elif isinstance(parsed, list):
+                ai_questions = parsed
+        except Exception as e:
+            logger.error(f"Error calling/parsing LLM quiz: {e}")
+            ai_questions = []
 
-        # Match sorularini dogrula ve duzelt
-        has_valid_match = False
+        match_questions = []
+        choice_questions = []
+        
         for q in ai_questions:
-            if q.get('type') == 'match' and isinstance(q.get('pairs'), list):
-                q['pairs'] = validate_match_pairs(q['pairs'])
-                if len(q['pairs']) >= 3:
-                    has_valid_match = True
-                else:
-                    q['pairs'] = generate_fallback_match()['pairs']
-                    has_valid_match = True
+            q_type = q.get('type')
+            if q_type == 'match' and isinstance(q.get('pairs'), list):
+                validated_pairs = validate_match_pairs(q['pairs'])
+                if len(validated_pairs) >= 3:
+                    q['pairs'] = validated_pairs
+                    match_questions.append(q)
+            elif q_type == 'choice':
+                cleaned_q = clean_and_verify_choice_question(q)
+                if cleaned_q:
+                    choice_questions.append(cleaned_q)
 
-        if not has_valid_match:
-            ai_questions.append(generate_fallback_match())
+        # 10 soruluk final listesini olusturalim
+        final_questions = []
+        
+        # 1. Match sorulari (tam olarak 2 tane)
+        while len(match_questions) < 2:
+            match_questions.append(generate_fallback_match())
+        final_questions.extend(match_questions[:2])
+        
+        # 2. Choice sorulari (tam olarak 4 tane)
+        while len(choice_questions) < 4:
+            choice_questions.append(generate_fallback_choice())
+        final_questions.extend(choice_questions[:4])
+        
+        # 3. Cumle sorulari (tam olarak 2 translate, 2 audio_assembly)
+        final_questions.extend(ts_questions)
+        final_questions.extend(aa_questions)
+        
+        # Sorulari karistiralim (Premium UX)
+        random.shuffle(final_questions)
+        
+        return final_questions
 
-        return ai_questions
     except Exception as e:
-        return [generate_fallback_match(), generate_fallback_match()]
+        logger.error(f"Generate quiz root exception: {e}")
+        # root exception durumunda da 10 soru garantisi
+        fallback_list = [
+            generate_fallback_match(),
+            generate_fallback_match(),
+            generate_fallback_choice(),
+            generate_fallback_choice(),
+            generate_fallback_choice(),
+            generate_fallback_choice(),
+        ]
+        # Cumleleri ekleyelim
+        for s in selected_sentences[:2]:
+            fallback_list.append({
+                "type": "translate_sentence",
+                "question": "Bu cümleyi çevir",
+                "sentence": s["en"],
+                "answer": s["tr"]
+            })
+        for s in selected_sentences[2:]:
+            fallback_list.append({
+                "type": "audio_assembly",
+                "question": "Duyduğun cümleyi oluştur",
+                "target": s["en"],
+                "distractors": ["running", "eating", "flying"]
+            })
+        random.shuffle(fallback_list)
+        return fallback_list
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
