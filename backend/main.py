@@ -9,8 +9,12 @@ import io
 import json
 import logging
 import random
+import re
+import requests
 import uvicorn
 logger = logging.getLogger(__name__)
+
+MODEL_NAME = "qwen2.5:latest" # Upgrade to 7B model for higher quality translation & chat
 
 app = FastAPI(title="MatchLang AI Tutor Backend")
 
@@ -53,6 +57,90 @@ async def upload_document(request: UploadDocumentRequest):
     return {"status": "success", "message": f"Document {request.doc_id} uploaded successfully."}
 
 ALL_WORDS = {}  # Flat lookup: en -> tr (from VERIFY_DICT)
+
+# --- MYMEMORY TRANSLATION HELPER ---
+_translation_cache = {}  # Basit cache: sentence -> translation
+
+def _get_mymemory_translation(text: str, langpair: str = "en|tr") -> str | None:
+    """MyMemory API uzerinden dogru ve dogal ceviri al.
+    Ucretsiz tier: ~5000 kelime/gun, hiz limiti yok."""
+    text = text.strip()
+    if not text:
+        return None
+    cache_key = f"{text}|{langpair}"
+    if cache_key in _translation_cache:
+        return _translation_cache[cache_key]
+    try:
+        resp = requests.get(
+            "https://api.mymemory.translated.net/get",
+            params={"q": text, "langpair": langpair},
+            timeout=4,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            translation = data.get("responseData", {}).get("translatedText", "")
+            if translation and translation.lower() != text.lower():
+                _translation_cache[cache_key] = translation
+                return translation
+    except Exception as e:
+        logger.warning(f"MyMemory API error: {e}")
+    return None
+
+def _generate_translation_hints(message: str) -> str:
+    """Kullanicinin mesajindan Ingilizce cumleler/ifadeler cikar,
+    MyMemory uzerinden dogrulanmis cevirilerini al ve prompt'a ekle."""
+    hints = []
+
+    # 1. Tirnak icindeki ifadeleri cikar: "I left my keys" veya 'hello world'
+    quoted = re.findall(r'["\u201c\u201d\'\u2018\u2019]([^"\'\u201c\u201d\u2018\u2019]{3,})["\u201c\u201d\'\u2018\u2019]', message)
+    for phrase in quoted:
+        phrase_stripped = phrase.strip()
+        if phrase_stripped and re.search(r'[a-zA-Z]', phrase_stripped):
+            tr = _get_mymemory_translation(phrase_stripped, "en|tr")
+            if tr:
+                hints.append(f'  - "{phrase_stripped}" => "{tr}"')
+
+    # 2. "... ne demek" / "... nasil cevirilir" / "... anlamı ne" kaliplarini yakala
+    patterns = [
+        r'(.{5,})\s+ne\s+demek',
+        r'(.{5,})\s+nas[ıi]l\s+[cç]evir',
+        r'(.{5,})\s+anlam[ıi]\s+ne',
+        r'(.{5,})\s+t[uü]rk[cç]esi\s+ne',
+        r'(.{5,})\s+ne\s+anlama',
+        r'translate[:\s]+(.{5,})',
+        r'(.{5,})\s+mean[s]?\s*[?]?$',
+    ]
+    for pat in patterns:
+        for m in re.finditer(pat, message, re.IGNORECASE):
+            phrase = m.group(1).strip().strip('"\'\'\u201c\u201d\u2018\u2019.,!?;:')
+            if phrase and re.search(r'[a-zA-Z]', phrase) and len(phrase) > 3:
+                tr = _get_mymemory_translation(phrase, "en|tr")
+                if tr:
+                    hint_str = f'  - "{phrase}" => "{tr}"'
+                    if hint_str not in hints:
+                        hints.append(hint_str)
+
+    # 3. Mesajin kendisi buyuk cogunlukla Ingilizce ise komple cevir
+    words = message.split()
+    if len(words) >= 4:
+        eng_words = sum(1 for w in words if re.match(r'^[a-zA-Z]+$', w))
+        if eng_words / len(words) > 0.7:
+            tr = _get_mymemory_translation(message, "en|tr")
+            if tr:
+                hint_str = f'  - "{message}" => "{tr}"'
+                if hint_str not in hints:
+                    hints.append(hint_str)
+
+    if not hints:
+        return ""
+
+    return (
+        "\n\nTRANSLATION REFERENCE (from verified external source):\n"
+        + "\n".join(hints)
+        + "\nCRITICAL: You MUST use the translations above EXACTLY as given. "
+        "Do NOT translate these sentences/phrases yourself. "
+        "Present the verified translation to the user as-is."
+    )
 
 @app.post("/chat")
 async def chat_with_tutor(request: ChatRequest):
@@ -119,6 +207,18 @@ async def chat_with_tutor(request: ChatRequest):
     # RAG Context
     context = rag_db.get_relevant_context(request.message)
     context_injection = f"\nKnowledge Base:\n{context}" if context else ""
+
+    # MyMemory Translation Hints
+    translation_hints = _generate_translation_hints(request.message)
+    _safe_print = lambda msg: None  # define early for debug below
+    def _safe_print(msg: str):
+        """Print safely on Windows CP1252 terminals."""
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            print(msg.encode('ascii', 'replace').decode())
+    if translation_hints:
+        _safe_print(f"[DEBUG CHAT] translation_hints: {translation_hints}")
     
     # CEFR Seviyesini belirle ve dogrulanmis cumleleri ekle
     try:
@@ -140,7 +240,7 @@ async def chat_with_tutor(request: ChatRequest):
         "RULE: When you want to give example sentences to the user for practice or explanation, you MUST ONLY use the sentences listed above with their exact Turkish translations. Do NOT make up your own sentences or translate them yourself."
     )
     
-    system_prompt = f"""You are MatchLang, a friendly and charismatic English tutor for Turkish speakers. User level: {request.level}/100.{weak_words_info}{quiz_info}{weak_topics_info}{context_injection}{verified_sentences_info}
+    system_prompt = f"""You are MatchLang, a friendly and charismatic English tutor for Turkish speakers. User level: {request.level}/100.{weak_words_info}{quiz_info}{weak_topics_info}{context_injection}{verified_sentences_info}{translation_hints}
 
 STRICT RULES:
 1. When the user writes Turkish, reply in Turkish but include English examples for learning.
@@ -151,6 +251,9 @@ STRICT RULES:
 6. NEVER repeat the same sentence twice.
 7. NEVER invent a name for the user.
 8. When writing Turkish, use correct grammar: ğ, ü, ş, ı, ö, ç characters properly.
+9. Ensure all Turkish sentences and translations use correct, natural Turkish grammar and sentence structures. Avoid word-for-word literal translations (e.g. translate "She has a banana" as "Onun bir muzu var" or "Onda bir muz var", NOT "O bir muzu var").
+10. If a TRANSLATION REFERENCE section is provided above, you MUST use those exact translations. NEVER translate English sentences to Turkish yourself - always use the verified translations given to you.
+11. When the user asks "X ne demek?" or asks for the meaning/translation of an English phrase, check the TRANSLATION REFERENCE first. If it contains the answer, use it word-for-word.
 
 EXAMPLE CONVERSATIONS:
 User: "Merhaba, bugün ne yapacağız?"
@@ -175,24 +278,17 @@ You: "'Book' Türkçede 'kitap' demek! 📚 Örnek cümle: 'I read a book every 
     if not messages or messages[-1]['content'] != request.message:
         messages.append({'role': 'user', 'content': request.message})
 
-    def _safe_print(msg: str):
-        """Print safely on Windows CP1252 terminals."""
-        try:
-            print(msg)
-        except UnicodeEncodeError:
-            print(msg.encode('ascii', 'replace').decode())
-
     _safe_print(f"[DEBUG CHAT] message: {request.message}")
     _safe_print(f"[DEBUG CHAT] worst_mistakes: {request.worst_mistakes}, weak_topics: {request.weak_topics}")
     _safe_print(f"[DEBUG CHAT] system_prompt (length={len(system_prompt)})")
     
     try:
         response = ollama.chat(
-            model='qwen2.5:3b', 
+            model=MODEL_NAME, 
             messages=messages,
             options={
-                "temperature": 0.5,
-                "top_p": 0.9
+                "temperature": 0.3,
+                "top_p": 0.85
             }
         )
         reply = response['message']['content']
@@ -221,7 +317,7 @@ async def explain_mistake(request: MistakeExplainRequest):
     prompt = f"Explain simply in Turkish why '{request.user_answer}' is wrong for target '{request.correct_answer}'. Context: {request.context_type} (English learning). Keep it short."
     
     try:
-        response = ollama.generate(model='qwen2.5:3b', prompt=prompt)
+        response = ollama.generate(model=MODEL_NAME, prompt=prompt)
         return {"response": response['response']}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -627,7 +723,7 @@ CRITICAL RULES:
 - For match: each pair MUST have correct English-Turkish translation from the CEFR {cefr} level.
 - Return {{"questions": [...]}} with exactly 10 items. No null values."""
 
-            response = ollama.chat(model='qwen2.5:3b', messages=[
+            response = ollama.chat(model=MODEL_NAME, messages=[
                 {'role': 'user', 'content': prompt}
             ], format='json')
             
