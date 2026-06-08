@@ -10,7 +10,6 @@ import json
 import logging
 import random
 import uvicorn
-
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="MatchLang AI Tutor Backend")
@@ -65,21 +64,27 @@ async def chat_with_tutor(request: ChatRequest):
     # Zayif kelimeleri belirt - DOGRULANMIS CEVIRILERLE
     if request.worst_mistakes:
         annotated = []
-        for w in request.worst_mistakes[:5]:
+        for w in request.worst_mistakes:
             tr = ALL_WORDS.get(w.lower(), None)
             if tr:
                 annotated.append(f"{w} (= {tr})")
-            else:
-                annotated.append(w)
-        mistakes_str = ', '.join(annotated)
-        weak_words_info = (
-            f"\nCRITICAL DATA - The user's mistake words with VERIFIED translations: {mistakes_str}. "
-            "RULES FOR THESE WORDS: "
-            "1) If the user asks about their mistakes/errors/wrong words, you MUST IMMEDIATELY list ALL these words with the exact Turkish translations shown in parentheses. Do NOT ask follow-up questions, just list them directly. "
-            "2) Use ONLY the translations shown in parentheses. Do NOT invent your own translations. "
-            "3) After listing, offer to practice these words with example sentences. "
-            "4) In normal conversation, weave these words naturally to help the user practice."
-        )
+            if len(annotated) >= 5:
+                break
+        if annotated:
+            mistakes_str = ', '.join(annotated)
+            weak_words_info = (
+                f"\nCRITICAL DATA - The user's mistake words with VERIFIED translations: {mistakes_str}. "
+                "RULES FOR THESE WORDS: "
+                "1) If the user asks about their mistakes/errors/wrong words, you MUST IMMEDIATELY list ALL these words with the exact Turkish translations shown in parentheses. Do NOT ask follow-up questions, just list them directly. "
+                "2) Use ONLY the translations shown in parentheses. Do NOT invent your own translations. "
+                "3) After listing, offer to practice these words with example sentences. "
+                "4) In normal conversation, weave these words naturally to help the user practice."
+            )
+        else:
+            weak_words_info = (
+                "\nThe user has not made any mistakes yet. "
+                "If the user asks about their mistakes, errors, or wrong words, tell them that they haven't made any mistakes yet and congratulate them!"
+            )
     else:
         weak_words_info = (
             "\nThe user has not made any mistakes yet. "
@@ -115,7 +120,27 @@ async def chat_with_tutor(request: ChatRequest):
     context = rag_db.get_relevant_context(request.message)
     context_injection = f"\nKnowledge Base:\n{context}" if context else ""
     
-    system_prompt = f"""You are MatchLang, a friendly and charismatic English tutor for Turkish speakers. User level: {request.level}/100.{weak_words_info}{quiz_info}{weak_topics_info}{context_injection}
+    # CEFR Seviyesini belirle ve dogrulanmis cumleleri ekle
+    try:
+        lvl_val = int(request.level)
+    except:
+        lvl_val = 1
+    cefr = 'A1'
+    if lvl_val >= 76: cefr = 'B2'
+    elif lvl_val >= 51: cefr = 'B1'
+    elif lvl_val >= 26: cefr = 'A2'
+
+    sentences_pool = _get_verified_sentences().get(cefr, _get_verified_sentences()['A1'])
+    sampled = random.sample(sentences_pool, min(5, len(sentences_pool)))
+    sentences_str = "\n".join([f"- English: \"{s['en']}\" | Turkish: \"{s['tr']}\"" for s in sampled])
+    
+    verified_sentences_info = (
+        f"\nVERIFIED EXAMPLE SENTENCES FOR THIS LEVEL ({cefr}):\n"
+        f"{sentences_str}\n"
+        "RULE: When you want to give example sentences to the user for practice or explanation, you MUST ONLY use the sentences listed above with their exact Turkish translations. Do NOT make up your own sentences or translate them yourself."
+    )
+    
+    system_prompt = f"""You are MatchLang, a friendly and charismatic English tutor for Turkish speakers. User level: {request.level}/100.{weak_words_info}{quiz_info}{weak_topics_info}{context_injection}{verified_sentences_info}
 
 STRICT RULES:
 1. When the user writes Turkish, reply in Turkish but include English examples for learning.
@@ -160,6 +185,7 @@ You: "'Book' Türkçede 'kitap' demek! 📚 Örnek cümle: 'I read a book every 
     _safe_print(f"[DEBUG CHAT] message: {request.message}")
     _safe_print(f"[DEBUG CHAT] worst_mistakes: {request.worst_mistakes}, weak_topics: {request.weak_topics}")
     _safe_print(f"[DEBUG CHAT] system_prompt (length={len(system_prompt)})")
+    
     try:
         response = ollama.chat(
             model='qwen2.5:3b', 
@@ -171,23 +197,23 @@ You: "'Book' Türkçede 'kitap' demek! 📚 Örnek cümle: 'I read a book every 
         )
         reply = response['message']['content']
         _safe_print(f"[DEBUG CHAT] LLM reply: {reply}")
-        
-        # Son savunma: Yasakli kaliplari temizle
-        banned = [
-            "Size nasıl yardımcı olabilirim",
-            "Size nasil yardimci olabilirim",
-            "How can I help you",
-            "How can I assist you",
-        ]
-        for phrase in banned:
-            reply = reply.replace(phrase + "?", "").replace(phrase + ".", "").replace(phrase, "")
-        reply = reply.strip()
-        if not reply:
-            reply = "Devam edelim! Bana bir soru sorabilir veya Ingilizce pratik yapabiliriz."
-        
-        return {"response": reply}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+        
+    # Son savunma: Yasakli kaliplari temizle
+    banned = [
+        "Size nasıl yardımcı olabilirim",
+        "Size nasil yardimci olabilirim",
+        "How can I help you",
+        "How can I assist you",
+    ]
+    for phrase in banned:
+        reply = reply.replace(phrase + "?", "").replace(phrase + ".", "").replace(phrase, "")
+    reply = reply.strip()
+    if not reply:
+        reply = "Devam edelim! Bana bir soru sorabilir veya Ingilizce pratik yapabiliriz."
+    
+    return {"response": reply}
 
 
 @app.post("/explain")
@@ -426,28 +452,24 @@ async def generate_quiz(request: QuizRequest):
     sentences_pool = _get_verified_sentences().get(cefr, _get_verified_sentences()['A1'])
 
     def validate_match_pairs(pairs):
-        """AI'nin urettigi match ciftlerini dogrula ve duzelt."""
+        """AI'nin urettigi match ciftlerini dogrula ve sadece dogrulanmis olanlari sakla."""
         validated = []
         seen_en = set()
         seen_tr = set()
         for pair in pairs:
             en = pair.get('en', '').strip().lower()
-            tr = pair.get('tr', '').strip()
-            if not en or not tr:
+            if not en:
                 continue
+            # Sadece dogrulanmis sozlukte olan kelimeleri kabul et
             if en in dict_for_level:
                 correct_tr = dict_for_level[en]
-                if tr.lower() != correct_tr.lower():
-                    logger.info(f"[QuizFix] '{en}': '{tr}' -> '{correct_tr}'")
-                    tr = correct_tr
-            
-            # Ayni kelimeden 2 tane varsa (UI'da bug yapar) atla
-            if en in seen_en or tr.lower() in seen_tr:
-                continue
+                # Ayni kelimeden 2 tane varsa (UI'da bug yapar) atla
+                if en in seen_en or correct_tr.lower() in seen_tr:
+                    continue
                 
-            seen_en.add(en)
-            seen_tr.add(tr.lower())
-            validated.append({"en": en, "tr": tr})
+                seen_en.add(en)
+                seen_tr.add(correct_tr.lower())
+                validated.append({"en": en, "tr": correct_tr})
         return validated
 
     def generate_fallback_match():
@@ -555,17 +577,16 @@ async def generate_quiz(request: QuizRequest):
             
         return q
 
-    # 4 Cumle tabanli soruyu dogrulanmis havuzumuzdan secelim (2 translate_sentence, 2 audio_assembly)
+    # 4 Cumle tabanli soruyu dogrulanmis havuzumuzdan secelim (2 speaking, 2 audio_assembly)
     selected_sentences = random.sample(sentences_pool, 4)
 
     try:
-        ts_questions = []
+        speaking_questions = []
         for s in selected_sentences[:2]:
-            ts_questions.append({
-                "type": "translate_sentence",
-                "question": "Bu cümleyi çevir",
-                "sentence": s["en"],
-                "answer": s["tr"]
+            speaking_questions.append({
+                "type": "speaking",
+                "question": "Cümleyi sesli telaffuz et",
+                "target": s["en"]
             })
             
         aa_questions = []
@@ -640,52 +661,59 @@ CRITICAL RULES:
         # 10 soruluk final listesini olusturalim
         final_questions = []
         
-        # 1. Match sorulari (tam olarak 2 tane)
+        # 1. Eşleştirme soruları (tam olarak 2 tane)
         while len(match_questions) < 2:
             match_questions.append(generate_fallback_match())
         final_questions.extend(match_questions[:2])
         
-        # 2. Choice sorulari (tam olarak 4 tane)
+        # 2. Cümleyi oluştur soruları (tam olarak 2 tane)
+        final_questions.extend(aa_questions[:2])
+        
+        # 3. Kelime Türkçesini ya da İngilizcesini bulma (tam olarak 4 tane)
         while len(choice_questions) < 4:
             choice_questions.append(generate_fallback_choice())
         final_questions.extend(choice_questions[:4])
         
-        # 3. Cumle sorulari (tam olarak 2 translate, 2 audio_assembly)
-        final_questions.extend(ts_questions)
-        final_questions.extend(aa_questions)
-        
-        # Sorulari karistiralim (Premium UX)
-        random.shuffle(final_questions)
+        # 4. Mikrofona konuşma soruları (tam olarak 2 tane)
+        final_questions.extend(speaking_questions[:2])
         
         return final_questions
 
     except Exception as e:
         logger.error(f"Generate quiz root exception: {e}")
-        # root exception durumunda da 10 soru garantisi
-        fallback_list = [
-            generate_fallback_match(),
-            generate_fallback_match(),
-            generate_fallback_choice(),
-            generate_fallback_choice(),
-            generate_fallback_choice(),
-            generate_fallback_choice(),
-        ]
-        # Cumleleri ekleyelim
-        for s in selected_sentences[:2]:
-            fallback_list.append({
-                "type": "translate_sentence",
-                "question": "Bu cümleyi çevir",
-                "sentence": s["en"],
-                "answer": s["tr"]
-            })
+        # root exception durumunda da 10 soru garantisi ve ayni sira
+        fallback_list = []
+        
+        # 1. Match soruları (2)
+        fallback_list.append(generate_fallback_match())
+        fallback_list.append(generate_fallback_match())
+        
+        # 2. Cümleyi oluştur soruları (2)
         for s in selected_sentences[2:]:
+            words_cleaned = s["en"].replace('.', '').replace(',', '').replace('?', '').replace('!', '').replace(';', '')
+            words = [w.strip() for w in words_cleaned.split() if w.strip()]
+            distractors = ["running", "eating", "flying"]
             fallback_list.append({
                 "type": "audio_assembly",
                 "question": "Duyduğun cümleyi oluştur",
                 "target": s["en"],
-                "distractors": ["running", "eating", "flying"]
+                "distractors": distractors
             })
-        random.shuffle(fallback_list)
+            
+        # 3. Çoktan seçmeli sorular (4)
+        fallback_list.append(generate_fallback_choice())
+        fallback_list.append(generate_fallback_choice())
+        fallback_list.append(generate_fallback_choice())
+        fallback_list.append(generate_fallback_choice())
+        
+        # 4. Mikrofona konuşma soruları (2)
+        for s in selected_sentences[:2]:
+            fallback_list.append({
+                "type": "speaking",
+                "question": "Cümleyi sesli telaffuz et",
+                "target": s["en"]
+            })
+            
         return fallback_list
 
 if __name__ == "__main__":

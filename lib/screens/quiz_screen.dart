@@ -632,12 +632,35 @@ class _MatchingQuestionWidgetState extends State<MatchingQuestionWidget> {
     rightSide = pairs.map((e) => e['tr'].toString()).toList()..shuffle();
   }
 
-  void _tap(String w, bool isL) {
-    // EĞER İNGİLİZCE KELİMEYSE OKU (SOL TARAF)
-    if (isL) {
-      widget.ttsManager.speak(w); // USE MANAGER
-    }
+  void _showTtsError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.wifi_off_rounded, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(
+              child: const Text(
+                "Ses çalınamadı. Sunucu bağlantısını kontrol edin.",
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.orangeAccent,
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.only(
+          bottom: MediaQuery.of(context).size.height - 150,
+          left: 20,
+          right: 20,
+        ),
+      ),
+    );
+  }
 
+  void _tap(String w, bool isL) {
     setState(() {
       if (isL) {
         selLeft = w;
@@ -645,6 +668,15 @@ class _MatchingQuestionWidgetState extends State<MatchingQuestionWidget> {
         selRight = w;
       }
     });
+
+    // EĞER İNGİLİZCE KELİMEYSE OKU (SOL TARAF) - Arka planda asenkron çalışsın, UI'ı kilitlemesin
+    if (isL) {
+      widget.ttsManager.speak(w, lang: 'en').then((success) {
+        if (!success) {
+          _showTtsError();
+        }
+      });
+    }
 
     if (selLeft != null && selRight != null) {
       if (pairs.any((p) => p['en'] == selLeft && p['tr'] == selRight)) {
@@ -842,10 +874,41 @@ class _ListeningAssemblyWidgetState extends State<ListeningAssemblyWidget> {
     }
   }
 
+  void _showTtsError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.wifi_off_rounded, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(
+              child: const Text(
+                "Ses çalınamadı. Sunucu bağlantısını kontrol edin.",
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.orangeAccent,
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.only(
+          bottom: MediaQuery.of(context).size.height - 150,
+          left: 20,
+          right: 20,
+        ),
+      ),
+    );
+  }
+
   void _playAudio({double rate = 0.5}) async {
     // Eger rate cok dusukse yavas okumayi aktif et (slow motion tusu)
     bool isSlow = rate < 0.3;
-    widget.ttsManager.speak(widget.data['target'] ?? "", slow: isSlow);
+    final success = await widget.ttsManager.speak(widget.data['target'] ?? "", lang: 'en', slow: isSlow);
+    if (!success) {
+      _showTtsError();
+    }
   }
 
   void _checkAnswer() {
@@ -1320,10 +1383,41 @@ class _TranslateState extends State<TranslateQuestionWidget> {
     }
   }
 
-  void _playAudio() {
+  void _showTtsError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.wifi_off_rounded, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(
+              child: const Text(
+                "Ses çalınamadı. Sunucu bağlantısını kontrol edin.",
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.orangeAccent,
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.only(
+          bottom: MediaQuery.of(context).size.height - 150,
+          left: 20,
+          right: 20,
+        ),
+      ),
+    );
+  }
+
+  void _playAudio() async {
     String text = (widget.data['sentence'] ?? widget.data['source'] ?? '').toString();
     if (text.isNotEmpty) {
-      widget.ttsManager.speak(text);
+      final success = await widget.ttsManager.speak(text);
+      if (!success) {
+        _showTtsError();
+      }
     }
   }
 
@@ -1400,37 +1494,40 @@ class _TranslateState extends State<TranslateQuestionWidget> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(15),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(20),
-                      topRight: Radius.circular(20),
-                      bottomRight: Radius.circular(20),
-                      bottomLeft: Radius.zero,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(
-                          Icons.volume_up,
-                          color: Colors.blueAccent,
-                        ),
-                        onPressed: _playAudio,
+                child: GestureDetector(
+                  onTap: _playAudio,
+                  child: Container(
+                    padding: const EdgeInsets.all(15),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(20),
+                        topRight: Radius.circular(20),
+                        bottomRight: Radius.circular(20),
+                        bottomLeft: Radius.zero,
                       ),
-                      Expanded(
-                        child: Text(
-                          (widget.data['sentence'] ?? widget.data['source'] ?? '').toString(),
-                          style: const TextStyle(
-                            fontSize: 18,
-                            color: Colors.black87,
-                            fontWeight: FontWeight.bold,
+                    ),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(
+                            Icons.volume_up,
+                            color: Colors.blueAccent,
+                          ),
+                          onPressed: _playAudio,
+                        ),
+                        Expanded(
+                          child: Text(
+                            (widget.data['sentence'] ?? widget.data['source'] ?? '').toString(),
+                            style: const TextStyle(
+                              fontSize: 18,
+                              color: Colors.black87,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),

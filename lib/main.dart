@@ -6,6 +6,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'package:google_sign_in/google_sign_in.dart';
+
 import 'models/user_data_provider.dart';
 
 import 'screens/welcome_screen.dart';
@@ -20,6 +22,11 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
   await Firebase.initializeApp();
+
+  // Initialize Google Sign-In with Web Client ID
+  await GoogleSignIn.instance.initialize(
+    serverClientId: '588339199744-sp9sl4k7a4qgsuhmgst1g8d0u5sfrbou.apps.googleusercontent.com',
+  );
 
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,

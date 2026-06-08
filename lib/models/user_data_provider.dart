@@ -178,6 +178,13 @@ class UserDataProvider with ChangeNotifier {
         if (data['knownWords'] != null) {
           knownWords = List<String>.from(data['knownWords']);
         }
+        if (data['wordStats'] != null) {
+          final statsData = data['wordStats'] as Map<String, dynamic>;
+          wordStats = statsData.map((key, value) => MapEntry(
+            key,
+            Map<String, int>.from(value as Map),
+          ));
+        }
         if (data['lastHeartTime'] != null) {
           lastHeartTime = (data['lastHeartTime'] as Timestamp).toDate();
         }
@@ -217,6 +224,7 @@ class UserDataProvider with ChangeNotifier {
       'todaysIncorrectAnswers': 0,
       'totalQuizzesPlayed': 0,
       'knownWords': [],
+      'wordStats': {},
       'streakCount': 0,
       'lastLoginDate': null,
     });

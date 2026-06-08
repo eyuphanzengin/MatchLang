@@ -1,5 +1,6 @@
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'service_manager.dart';
 
 class TtsManager {
@@ -40,8 +41,8 @@ class TtsManager {
   }
 
   /// Verilen metni seslendirir. Dil otomatik algilanir veya elle verilebilir.
-  Future<void> speak(String text, {String? lang, bool slow = false}) async {
-    if (text.isEmpty) return;
+  Future<bool> speak(String text, {String? lang, bool slow = false}) async {
+    if (text.isEmpty) return false;
 
     // Dil belirtilmemisse otomatik algila
     lang ??= _detectLanguage(text);
@@ -54,10 +55,20 @@ class TtsManager {
       _isSpeaking = true;
       final String baseUrl = ServiceManager().backendBaseUrl;
       String url = '$baseUrl/tts?text=${Uri.encodeComponent(text)}&lang=$lang&slow=$slow';
-      await _audioPlayer.play(UrlSource(url));
+      
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 4));
+      if (response.statusCode == 200) {
+        await _audioPlayer.play(BytesSource(response.bodyBytes));
+        return true;
+      } else {
+        _isSpeaking = false;
+        debugPrint("TTS Server response error: ${response.statusCode}");
+        return false;
+      }
     } catch (e) {
       _isSpeaking = false;
       debugPrint("TTS Speak Error: $e");
+      return false;
     }
   }
 
